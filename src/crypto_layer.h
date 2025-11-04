@@ -1,0 +1,9 @@
+
+typedef enum {
+  UNKNOWN = 0,
+  ED25519,
+  RSA_SHA512,
+  RSA_SHA256,
+  P384_SHA256,
+  P384_SHA512,
+} AlgID;
