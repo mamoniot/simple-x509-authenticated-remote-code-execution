@@ -16,7 +16,7 @@
 #define X509_ACCEPTED_VERSION 2
 
 typedef enum {
-  SUCCESS,
+  OK,
   UNEXPECTED_END_OF_DATA,
   UNEXPECTED_IDENTIFIER,
   INVALID_END_OF_DATA,
@@ -24,14 +24,15 @@ typedef enum {
   INVALID_LENGTH_TOO_LONG,
   TRAILING_DATA,
   INVALID_VERSION,
+  INVALID_BOOLEAN,
 } Code;
 
 typedef struct {
   AlgID id;
 } PublicKeyBuilder;
 
-Code parse_data_element(byte *raw_cert, uint8 expected_identifier, inta *idx, inta parent_end,
-                       inta *ret_content_end) {
+Code parse_data_element(byte *raw_cert, uint8 expected_identifier, uinta *idx, uinta parent_end,
+                       uinta *ret_content_end) {
   if (*idx >= parent_end) {
     return UNEXPECTED_END_OF_DATA;
   }
@@ -45,7 +46,7 @@ Code parse_data_element(byte *raw_cert, uint8 expected_identifier, inta *idx, in
     return INVALID_END_OF_DATA;
   }
 
-  inta length_byte = raw_cert[*idx];
+  uinta length_byte = raw_cert[*idx];
 
   if (length_byte == DER_LENGTH_INDEFINITE ||
       length_byte == DER_LENGTH_RESERVED) {
@@ -53,7 +54,7 @@ Code parse_data_element(byte *raw_cert, uint8 expected_identifier, inta *idx, in
     return INVALID_LENGTH_FORM;
   }
 
-  inta length = 0;
+  uinta length = 0;
   *idx += 1;
 
   if ((length_byte & DER_LENGTH_FORM_MASK) > 0) {
@@ -86,73 +87,73 @@ Code parse_data_element(byte *raw_cert, uint8 expected_identifier, inta *idx, in
   }
 
   *ret_content_end = *idx + length;
-  return SUCCESS;
+  return OK;
 }
 
-Code parse_alg_params(byte *raw_cert, inta alg_oid_start, inta alg_oid_end, inta alg_id_end,
+Code parse_alg_params(byte *raw_cert, uinta alg_oid_start, uinta alg_oid_end, uinta alg_id_end,
                       PublicKeyBuilder *public_key);
 
 /*AlgorithmIdentifier  ::=  SEQUENCE  {
         algorithm               OBJECT IDENTIFIER,
         parameters              ANY DEFINED BY algorithm OPTIONAL  }*/
-Code parse_alg_id(byte *raw_cert, inta *idx, inta parent_end, PublicKeyBuilder *public_key) {
-  inta alg_id_end = 0;
+Code parse_alg_id(byte *raw_cert, uinta *idx, uinta parent_end, PublicKeyBuilder *public_key) {
+  uinta alg_id_end = 0;
   Code code = parse_data_element(raw_cert, DER_SEQUENCE, idx, parent_end, &alg_id_end);
-  if (code != SUCCESS) {
+  if (code != OK) {
     return code;
   }
 
   /*algorithm               OBJECT IDENTIFIER*/
-  inta alg_oid_end = 0;
+  uinta alg_oid_end = 0;
   code = parse_data_element(raw_cert, DER_OID, idx, alg_id_end, &alg_oid_end);
-  if (code != SUCCESS) {
+  if (code != OK) {
     return code;
   }
 
-  inta alg_oid_start = *idx;
+  uinta alg_oid_start = *idx;
   *idx = alg_oid_end;
 
   /*parameters              ANY DEFINED BY algorithm OPTIONAL*/
   code = parse_alg_params(raw_cert, alg_oid_start, alg_oid_end, alg_id_end, public_key);
-  if (code != SUCCESS) {
+  if (code != OK) {
     return code;
   }
 
   *idx = alg_id_end;
 
-  return SUCCESS;
+  return OK;
 }
 /*subjectPublicKey     BIT STRING*/
-Code parse_public_key(byte *raw_cert, inta *idx, inta parent_end, PublicKeyBuilder *public_key) {
-  inta public_key_end = 0;
+Code parse_public_key(byte *raw_cert, uinta *idx, uinta parent_end, PublicKeyBuilder *public_key) {
+  uinta public_key_end = 0;
   Code code = parse_data_element(raw_cert, DER_BITSTRING, idx, parent_end, &public_key_end);
-  if (code != SUCCESS) {
+  if (code != OK) {
     return code;
   }
 
   // TODO: Parse public key contents.
-  inta public_key_start = *idx;
+  uinta public_key_start = *idx;
   *idx = public_key_end;
 
-  return SUCCESS;
+  return OK;
 }
 
 /*Name ::= CHOICE { -- only one possibility for now --
    rdnSequence  RDNSequence }*/
-Code parse_name(byte *raw_cert, inta *idx, inta parent_end) {
+Code parse_name(byte *raw_cert, uinta *idx, uinta parent_end) {
   /*RDNSequence ::= SEQUENCE OF RelativeDistinguishedName*/
-  inta issuer_end = 0;
+  uinta issuer_end = 0;
   Code code = parse_data_element(raw_cert, DER_SEQUENCE, idx, parent_end, &issuer_end);
-  if (code != SUCCESS) {
+  if (code != OK) {
     return code;
   }
 
   /*RelativeDistinguishedName ::=
      SET SIZE (1..MAX) OF AttributeTypeAndValue*/
-  inta relative_name_end = 0;
+  uinta relative_name_end = 0;
   while (relative_name_end < issuer_end) {
     code = parse_data_element(raw_cert, DER_SET, idx, issuer_end, &relative_name_end);
-    if (code != SUCCESS) {
+    if (code != OK) {
       return code;
     }
     // TODO: Should we check for sorted ordering for this set?
@@ -160,27 +161,27 @@ Code parse_name(byte *raw_cert, inta *idx, inta parent_end) {
     /*AttributeTypeAndValue ::= SEQUENCE {
      type     AttributeType,
      value    AttributeValue }*/
-    inta attribute_end = 0;
+    uinta attribute_end = 0;
     code = parse_data_element(raw_cert, DER_SEQUENCE, idx, relative_name_end, &attribute_end);
-    if (code != SUCCESS) {
+    if (code != OK) {
       return code;
     }
 
     /*AttributeType ::= OBJECT IDENTIFIER*/
-    inta attribute_type_end = 0;
+    uinta attribute_type_end = 0;
     code = parse_data_element(raw_cert, DER_OID, idx, attribute_end, &attribute_type_end);
-    if (code != SUCCESS) {
+    if (code != OK) {
       return code;
     }
 
-    inta attribute_type_start = *idx;
+    uinta attribute_type_start = *idx;
     *idx = attribute_type_end;
 
     /*AttributeValue ::= ANY -- DEFINED BY AttributeType*/
-    inta attribute_value_end = 0;
+    uinta attribute_value_end = 0;
     // TODO: Replace with choice call.
     code = parse_data_element(raw_cert, 111, idx, attribute_end, &attribute_value_end);
-    if (code != SUCCESS) {
+    if (code != OK) {
       return code;
     }
     if (attribute_end != attribute_value_end) {
@@ -188,52 +189,51 @@ Code parse_name(byte *raw_cert, inta *idx, inta parent_end) {
     }
     // TODO: Finish parsing contents.
 
-    inta attribute_value_start = *idx;
+    uinta attribute_value_start = *idx;
     *idx = attribute_value_end;
   }
 
-  return SUCCESS;
+  return OK;
 }
 /*Time ::= CHOICE {
       utcTime        UTCTime,
       generalTime    GeneralizedTime }*/
-Code parse_time(byte *raw_cert, inta *idx, inta parent_end, inta *ret_unix_ts);
+Code parse_time(byte *raw_cert, uinta *idx, uinta parent_end, int64 *ret_unix_ts);
 
-Code parse_optional_content(byte *raw_cert, uint8 expected_identifier, inta *idx, inta parent_end, inta *ret_content_end) {
+Code parse_optional_data(byte *raw_cert, uint8 expected_identifier, uinta *idx, uinta parent_end, uinta *ret_content_end) {
   Code code = parse_data_element(raw_cert, expected_identifier, idx, parent_end, ret_content_end);
   switch (code) {
   case UNEXPECTED_END_OF_DATA:
   case UNEXPECTED_IDENTIFIER:
-    *ret_content_end = 0;
-  case SUCCESS:
-    return SUCCESS;
+  case OK:
+    return OK;
   default:
     return code;
   }
 }
 
-Code parse_x509(byte *raw_cert, inta raw_cert_size) {
-  inta idx_mem = 0;
-  inta *idx = &idx_mem;
+Code parse_x509(byte *raw_cert, uinta raw_cert_size) {
+  uinta idx_mem = 0;
+  uinta *idx = &idx_mem;
 
-  inta cert_end = 0;
+  uinta cert_end = 0;
   Code code = parse_data_element(raw_cert, DER_SEQUENCE, idx, raw_cert_size, &cert_end);
-  if(code != SUCCESS) {
+  if(code != OK) {
     return code;
   }
   if (raw_cert_size != cert_end) {
     return TRAILING_DATA;
   }
 
-  inta tbs_cert_end = 0;
+  uinta tbs_cert_end = 0;
   code = parse_data_element(raw_cert, DER_SEQUENCE, idx, cert_end, &tbs_cert_end);
-  if (code != SUCCESS) {
+  if (code != OK) {
     return code;
   }
 
-  inta version_end = 0;
+  uinta version_end = 0;
   code = parse_data_element(raw_cert, DER_INTEGER, idx, tbs_cert_end, &version_end);
-  if (code != SUCCESS) {
+  if (code != OK) {
     return code;
   }
   if (version_end - *idx != 1 || raw_cert[*idx] != X509_ACCEPTED_VERSION) {
@@ -242,9 +242,9 @@ Code parse_x509(byte *raw_cert, inta raw_cert_size) {
 
   *idx = version_end;
 
-  inta serial_end = 0;
+  uinta serial_end = 0;
   code = parse_data_element(raw_cert, DER_INTEGER, idx, tbs_cert_end, &serial_end);
-  if (code != SUCCESS) {
+  if (code != OK) {
     return code;
   }
 
@@ -253,13 +253,13 @@ Code parse_x509(byte *raw_cert, inta raw_cert_size) {
 
   PublicKeyBuilder public_key = {0};
   code = parse_alg_id(raw_cert, idx, tbs_cert_end, &public_key);
-  if (code != SUCCESS) {
+  if (code != OK) {
     return code;
   }
 
   /*issuer               Name*/
   code = parse_name(raw_cert, idx, tbs_cert_end);
-  if (code != SUCCESS) {
+  if (code != OK) {
     return code;
   }
 
@@ -267,23 +267,23 @@ Code parse_x509(byte *raw_cert, inta raw_cert_size) {
   /*Validity ::= SEQUENCE {
         notBefore      Time,
         notAfter       Time }*/
-  inta validity_end = 0;
+  uinta validity_end = 0;
   code = parse_data_element(raw_cert, DER_SEQUENCE, idx, tbs_cert_end, &validity_end);
-  if (code != SUCCESS) {
+  if (code != OK) {
     return code;
   }
 
   /*notBefore      Time*/
   int64 not_before_ts = 0;
   code = parse_time(raw_cert, idx, validity_end, &not_before_ts);
-  if (code != SUCCESS) {
+  if (code != OK) {
     return code;
   }
 
   /*notAfter       Time*/
   int64 not_after_ts = 0;
   code = parse_time(raw_cert, idx, validity_end, &not_after_ts);
-  if (code != SUCCESS) {
+  if (code != OK) {
     return code;
   }
   if (validity_end != *idx) {
@@ -292,7 +292,7 @@ Code parse_x509(byte *raw_cert, inta raw_cert_size) {
 
   /*subject              Name*/
   code = parse_name(raw_cert, idx, tbs_cert_end);
-  if (code != SUCCESS) {
+  if (code != OK) {
     return code;
   }
 
@@ -300,19 +300,19 @@ Code parse_x509(byte *raw_cert, inta raw_cert_size) {
   /*SubjectPublicKeyInfo  ::=  SEQUENCE  {
         algorithm            AlgorithmIdentifier,
         subjectPublicKey     BIT STRING  }*/
-  inta public_key_info_end = 0;
+  uinta public_key_info_end = 0;
   code = parse_data_element(raw_cert, DER_SEQUENCE, idx, tbs_cert_end, &public_key_info_end);
-  if (code != SUCCESS) {
+  if (code != OK) {
     return code;
   }
 
   code = parse_alg_id(raw_cert, idx, public_key_info_end, &public_key);
-  if (code != SUCCESS) {
+  if (code != OK) {
     return code;
   }
 
   code = parse_public_key(raw_cert, idx, public_key_info_end, &public_key);
-  if (code != SUCCESS) {
+  if (code != OK) {
     return code;
   }
   if (*idx != public_key_info_end) {
@@ -320,35 +320,38 @@ Code parse_x509(byte *raw_cert, inta raw_cert_size) {
   }
 
   /*issuerUniqueID  [1]  IMPLICIT UniqueIdentifier OPTIONAL*/
-  inta issuer_uid_end = 0;
-  code = parse_optional_content(raw_cert, DER_BITSTRING, idx, tbs_cert_end, &issuer_uid_end);
-  if (code != SUCCESS) {
+  uinta issuer_uid_end = 0;
+  code = parse_optional_data(raw_cert, DER_BITSTRING, idx, tbs_cert_end, &issuer_uid_end);
+  if (code != OK) {
     return code;
   }
-
-  inta issuer_uid_start = *idx;
-  *idx = issuer_uid_end;
+  if (issuer_uid_end > 0) {
+    uinta issuer_uid_start = *idx;
+    *idx = issuer_uid_end;
+  }
 
   /*subjectUniqueID [2]  IMPLICIT UniqueIdentifier OPTIONAL*/
-  inta subject_uid_end = 0;
-  code = parse_optional_content(raw_cert, DER_BITSTRING, idx, tbs_cert_end, &subject_uid_end);
-  if (code != SUCCESS) {
+  uinta subject_uid_end = 0;
+  code = parse_optional_data(raw_cert, DER_BITSTRING, idx, tbs_cert_end, &subject_uid_end);
+  if (code != OK) {
     return code;
   }
-
-  inta subject_uid_start = *idx;
-  *idx = subject_uid_end;
+  if (subject_uid_end > 0) {
+    uinta subject_uid_start = *idx;
+    *idx = subject_uid_end;
+  }
 
   /*extensions      [3]  EXPLICIT Extensions OPTIONAL*/
   /*Extensions  ::=  SEQUENCE SIZE (1..MAX) OF Extension*/
-  inta extensions_end = 0;
-  code = parse_optional_content(raw_cert, DER_SEQUENCE, idx, tbs_cert_end, &extensions_end);
-  if (code != SUCCESS) {
+  uinta extensions_end = 0;
+  code = parse_optional_data(raw_cert, DER_SEQUENCE, idx, tbs_cert_end, &extensions_end);
+  if (code != OK) {
     return code;
   }
-
-  inta extensions_start = *idx;
-  *idx = extensions_end;
+  if (extensions_end > 0) {
+    uinta extensions_start = *idx;
+    *idx = extensions_end;
+  }
 
   while (*idx < extensions_end) {
     // TODO: Should we check for sorted ordering for this set?
@@ -361,45 +364,51 @@ Code parse_x509(byte *raw_cert, inta raw_cert_size) {
                       -- corresponding to the extension type identified
                       -- by extnID
           }*/
-    inta extension_end = 0;
+    uinta extension_end = 0;
     code = parse_data_element(raw_cert, DER_SEQUENCE, idx, extensions_end, &extension_end);
-    if (code != SUCCESS) {
+    if (code != OK) {
       return code;
     }
 
     /*extnID      OBJECT IDENTIFIER*/
-    inta extn_oid_end = 0;
+    uinta extn_oid_end = 0;
     code = parse_data_element(raw_cert, DER_OID, idx, extension_end, &extn_oid_end);
-    if (code != SUCCESS) {
+    if (code != OK) {
       return code;
     }
 
-    inta extn_oid_start = *idx;
+    uinta extn_oid_start = *idx;
     *idx = extn_oid_end;
 
     /*critical    BOOLEAN DEFAULT FALSE*/
-    inta critical_end = 0;
+    uinta critical_end = 0;
     // TODO: Replace with choice call.
-    code = parse_optional_content(raw_cert, DER_BOOLEAN, idx, extension_end, &critical_end);
-    if (code != SUCCESS) {
+    code = parse_optional_data(raw_cert, DER_BOOLEAN, idx, extension_end, &critical_end);
+    if (code != OK) {
       return code;
     }
 
-    inta critical_start = *idx;
-    *idx = critical_end;
+    bool critical = false;
+    if (critical_end >= *idx + 1) {
+      if (critical_end > *idx + 1 || raw_cert[*idx] > 1) {
+        return INVALID_BOOLEAN;
+      }
+      critical = raw_cert[*idx] == 1;
+      *idx = critical_end;
+    }
 
     /*extnValue   OCTET STRING
                       -- contains the DER encoding of an ASN.1 value
                       -- corresponding to the extension type identified
                       -- by extnID
           }*/
-        inta extn_end = 0;
+    uinta extn_end = 0;
     code = parse_data_element(raw_cert, DER_OCTET_STRING, idx, extension_end, &extn_end);
-    if (code != SUCCESS) {
+    if (code != OK) {
       return code;
     }
 
-    inta extn_start = *idx;
+    uinta extn_start = *idx;
     *idx = extn_end;
 
     if (extn_end != extension_end) {
@@ -411,5 +420,5 @@ Code parse_x509(byte *raw_cert, inta raw_cert_size) {
 
   // TODO: Finish parsing signatures.
 
-  return SUCCESS;
+  return OK;
 }
