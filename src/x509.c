@@ -1,20 +1,24 @@
 #include "assert.h"
 #include "basic.h"
 #include "crypto_layer.h"
+#include "time.h"
 
-#define DER_BOOLEAN   0b00000001
-#define DER_INTEGER   0b00000010
-#define DER_BITSTRING 0b00000011
-#define DER_OCTET_STRING 0b00000100
-#define DER_OID       0b00000110
-#define DER_SEQUENCE  0b00110000
-#define DER_SET       0b00110001
+const byte DER_CONSTRUCTED = 0b00100000;
+const byte DER_BOOLEAN = 1;
+const byte DER_INTEGER = 2;
+const byte DER_BITSTRING = DER_CONSTRUCTED | 3;
+const byte DER_OCTET_STRING = DER_CONSTRUCTED | 4;
+const byte DER_OID = 6;
+const byte DER_SEQUENCE = DER_CONSTRUCTED | 16;
+const byte DER_SET = DER_CONSTRUCTED | 17;
+const byte DER_UTCTIME = 23;
+const byte DER_GENERALIZEDTIME = 24;
 
-#define DER_LENGTH_FORM_MASK   0b10000000
-#define DER_LENGTH_INDEFINITE  0b10000000
-#define DER_LENGTH_RESERVED    0b11111111
+const byte DER_LENGTH_FORM_MASK = 0b10000000;
+const byte DER_LENGTH_INDEFINITE = 0b10000000;
+const byte DER_LENGTH_RESERVED = 0b11111111;
 
-#define X509_ACCEPTED_VERSION 2
+const byte X509_ACCEPTED_VERSION = 2;
 
 typedef enum {
   OK,
@@ -26,6 +30,7 @@ typedef enum {
   TRAILING_DATA,
   INVALID_VERSION,
   INVALID_BOOLEAN,
+  INVALID_VALIDITY_TIME,
 } Code;
 
 typedef struct {
@@ -143,17 +148,17 @@ Code parse_public_key(byte *raw_cert, uinta *idx, uinta parent_end, PublicKeyBui
    rdnSequence  RDNSequence }*/
 Code parse_name(byte *raw_cert, uinta *idx, uinta parent_end) {
   /*RDNSequence ::= SEQUENCE OF RelativeDistinguishedName*/
-  // TODO: It is not fully clear to me what length this sequence can actual be.
   uinta name_end = 0;
   Code code = parse_data_element(raw_cert, DER_SEQUENCE, idx, parent_end, &name_end);
   if (code != OK) {
     return code;
   }
 
-  uinta relative_name_end = 0;
-  while (relative_name_end < name_end) {
+  // This sequence may be empty.
+  while (*idx < name_end) {
     /*RelativeDistinguishedName ::=
        SET SIZE (1..MAX) OF AttributeTypeAndValue*/
+    uinta relative_name_end = 0;
     code = parse_data_element(raw_cert, DER_SET, idx, name_end, &relative_name_end);
     if (code != OK) {
       return code;
@@ -163,6 +168,7 @@ Code parse_name(byte *raw_cert, uinta *idx, uinta parent_end) {
     /*AttributeTypeAndValue ::= SEQUENCE {
      type     AttributeType,
      value    AttributeValue }*/
+    // This set may not be empty.
     uinta attribute_end = 0;
     while (attribute_end < relative_name_end) {
       code = parse_data_element(raw_cert, DER_SEQUENCE, idx, relative_name_end, &attribute_end);
@@ -201,10 +207,6 @@ Code parse_name(byte *raw_cert, uinta *idx, uinta parent_end) {
 
   return OK;
 }
-/*Time ::= CHOICE {
-      utcTime        UTCTime,
-      generalTime    GeneralizedTime }*/
-Code parse_time(byte *raw_cert, uinta *idx, uinta parent_end, int64 *ret_unix_ts);
 
 Code parse_optional_data(byte *raw_cert, uint8 expected_identifier, uinta *idx, uinta parent_end, uinta *ret_content_end) {
   Code code = parse_data_element(raw_cert, expected_identifier, idx, parent_end, ret_content_end);
@@ -216,6 +218,84 @@ Code parse_optional_data(byte *raw_cert, uint8 expected_identifier, uinta *idx, 
   default:
     return code;
   }
+}
+
+
+/*Time ::= CHOICE {
+      utcTime        UTCTime,
+      generalTime    GeneralizedTime }*/
+Code parse_time(byte *raw_cert, uinta *idx, uinta parent_end, time_t *ret_unix_ts) {
+  const uinta UTCTIME_SIZE = 13;
+  const uinta GENERALIZEDTIME_SIZE = 15;
+
+  int ch;
+#define CONVERT_NUM(n, m)                                                                          \
+  {                                                                                                \
+    ch = raw_cert[*idx];                                                                           \
+    if (ch < '0' || ch > '9') {                                                                    \
+      return INVALID_VALIDITY_TIME;                                                                \
+    } else {                                                                                       \
+      *idx += 1;                                                                                   \
+      n += (ch - '0') * (m);                                                                       \
+    }                                                                                              \
+  }
+#define CONVERT_2DIGIT(n) {CONVERT_NUM(n, 10); CONVERT_NUM(n, 1);}
+
+  // A time_t can theoretically be 32 bits, which would be disatrous as all timestamps would
+  // overflow in 2038. To compensate we will not support compilers that use 32 bit time_t.
+  assert(sizeof(time_t) > 4);
+
+  struct tm utc = {0};
+
+  uinta ts_end = 0;
+  Code code = parse_optional_data(raw_cert, DER_UTCTIME, idx, parent_end, &ts_end);
+  if (code != OK) {
+    return code;
+  }
+
+  if (ts_end > 0) {
+    if (*idx + UTCTIME_SIZE != ts_end) {
+      return INVALID_VALIDITY_TIME;
+    }
+
+    CONVERT_2DIGIT(utc.tm_year);
+    utc.tm_year += (utc.tm_year >= 50) ? 1900 : 2000;
+  } else {
+    // GeneralizedTime and UTCTime only differ by 2 YY characters.
+    Code code = parse_data_element(raw_cert, DER_GENERALIZEDTIME, idx, parent_end, &ts_end);
+    if (code != OK) {
+      return code;
+    }
+    if (*idx + GENERALIZEDTIME_SIZE != ts_end) {
+      return INVALID_VALIDITY_TIME;
+    }
+
+    CONVERT_NUM(utc.tm_year, 1000);
+    CONVERT_NUM(utc.tm_year, 100);
+    CONVERT_NUM(utc.tm_year, 10);
+    CONVERT_NUM(utc.tm_year, 1);
+  }
+  CONVERT_2DIGIT(utc.tm_mon);
+  CONVERT_2DIGIT(utc.tm_mday);
+  CONVERT_2DIGIT(utc.tm_hour);
+  CONVERT_2DIGIT(utc.tm_min);
+  CONVERT_2DIGIT(utc.tm_sec);
+  if (raw_cert[*idx] != 'Z') {
+    return INVALID_VALIDITY_TIME;
+  }
+
+  struct tm pre_utc = utc;
+  time_t ret = mktime(&utc);
+  // If mktime altered the date then it was out of range and thus is invalid.
+  if (ret < 0 || pre_utc.tm_year != utc.tm_year || pre_utc.tm_mon != utc.tm_mon ||
+      pre_utc.tm_mday != utc.tm_mday || pre_utc.tm_hour != utc.tm_hour ||
+      pre_utc.tm_min != utc.tm_min || pre_utc.tm_sec != utc.tm_sec) {
+    return INVALID_VALIDITY_TIME;
+  }
+
+  *idx = ts_end;
+  *ret_unix_ts = ret;
+  return OK;
 }
 
 Code parse_x509(byte *raw_cert, uinta raw_cert_size) {
@@ -303,14 +383,14 @@ Code parse_x509(byte *raw_cert, uinta raw_cert_size) {
   }
 
   /*notBefore      Time*/
-  int64 not_before_ts = 0;
+  time_t not_before_ts = 0;
   code = parse_time(raw_cert, idx, validity_end, &not_before_ts);
   if (code != OK) {
     return code;
   }
 
   /*notAfter       Time*/
-  int64 not_after_ts = 0;
+  time_t not_after_ts = 0;
   code = parse_time(raw_cert, idx, validity_end, &not_after_ts);
   if (code != OK) {
     return code;
@@ -357,6 +437,7 @@ Code parse_x509(byte *raw_cert, uinta raw_cert_size) {
   if (issuer_uid_end > 0) {
     uinta issuer_uid_start = *idx;
     *idx = issuer_uid_end;
+    // TODO: Finish parsing contents.
   }
 
   /*subjectUniqueID [2]  IMPLICIT UniqueIdentifier OPTIONAL*/
@@ -368,6 +449,7 @@ Code parse_x509(byte *raw_cert, uinta raw_cert_size) {
   if (subject_uid_end > 0) {
     uinta subject_uid_start = *idx;
     *idx = subject_uid_end;
+    // TODO: Finish parsing contents.
   }
 
   /*extensions      [3]  EXPLICIT Extensions OPTIONAL*/
@@ -380,6 +462,7 @@ Code parse_x509(byte *raw_cert, uinta raw_cert_size) {
   if (extensions_end > 0) {
     uinta extensions_start = *idx;
     *idx = extensions_end;
+    // TODO: Finish parsing contents.
   }
 
   while (*idx < extensions_end) {
@@ -411,7 +494,6 @@ Code parse_x509(byte *raw_cert, uinta raw_cert_size) {
 
     /*critical    BOOLEAN DEFAULT FALSE*/
     uinta critical_end = 0;
-    // TODO: Replace with choice call.
     code = parse_optional_data(raw_cert, DER_BOOLEAN, idx, extension_end, &critical_end);
     if (code != OK) {
       return code;
@@ -426,11 +508,7 @@ Code parse_x509(byte *raw_cert, uinta raw_cert_size) {
       *idx = critical_end;
     }
 
-    /*extnValue   OCTET STRING
-                      -- contains the DER encoding of an ASN.1 value
-                      -- corresponding to the extension type identified
-                      -- by extnID
-          }*/
+    /*extnValue   OCTET STRING*/
     uinta extn_end = 0;
     code = parse_data_element(raw_cert, DER_OCTET_STRING, idx, extension_end, &extn_end);
     if (code != OK) {
@@ -445,14 +523,31 @@ Code parse_x509(byte *raw_cert, uinta raw_cert_size) {
 
     // TODO: Finish parsing contents.
   }
-  assert(*idx == extensions_end);
+  if (*idx != tbs_cert_end) {
+    return TRAILING_DATA;
+  }
 
-  code = parse_alg_id(raw_cert, idx, tbs_cert_end, &public_key);
+  // End of TBS certificate parsing.
+  /*signatureAlgorithm   AlgorithmIdentifier*/
+  code = parse_alg_id(raw_cert, idx, cert_end, &public_key);
   if (code != OK) {
     return code;
   }
 
-  // TODO: Finish parsing signatures.
+  /*signatureValue       BIT STRING*/
+  uinta signature_end = 0;
+  code = parse_data_element(raw_cert, DER_BITSTRING, idx, cert_end, &signature_end);
+  if (code != OK) {
+    return code;
+  }
+  if (signature_end != cert_end) {
+    return TRAILING_DATA;
+  }
+
+  uinta signature_start = *idx;
+  *idx = signature_end;
+
+  // TODO: Finish parsing signature.
 
   return OK;
 }
