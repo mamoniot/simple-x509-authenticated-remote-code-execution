@@ -1,3 +1,4 @@
+#include "assert.h"
 #include "basic.h"
 #include "crypto_layer.h"
 
@@ -142,17 +143,18 @@ Code parse_public_key(byte *raw_cert, uinta *idx, uinta parent_end, PublicKeyBui
    rdnSequence  RDNSequence }*/
 Code parse_name(byte *raw_cert, uinta *idx, uinta parent_end) {
   /*RDNSequence ::= SEQUENCE OF RelativeDistinguishedName*/
-  uinta issuer_end = 0;
-  Code code = parse_data_element(raw_cert, DER_SEQUENCE, idx, parent_end, &issuer_end);
+  // TODO: It is not fully clear to me what length this sequence can actual be.
+  uinta name_end = 0;
+  Code code = parse_data_element(raw_cert, DER_SEQUENCE, idx, parent_end, &name_end);
   if (code != OK) {
     return code;
   }
 
-  /*RelativeDistinguishedName ::=
-     SET SIZE (1..MAX) OF AttributeTypeAndValue*/
   uinta relative_name_end = 0;
-  while (relative_name_end < issuer_end) {
-    code = parse_data_element(raw_cert, DER_SET, idx, issuer_end, &relative_name_end);
+  while (relative_name_end < name_end) {
+    /*RelativeDistinguishedName ::=
+       SET SIZE (1..MAX) OF AttributeTypeAndValue*/
+    code = parse_data_element(raw_cert, DER_SET, idx, name_end, &relative_name_end);
     if (code != OK) {
       return code;
     }
@@ -162,36 +164,40 @@ Code parse_name(byte *raw_cert, uinta *idx, uinta parent_end) {
      type     AttributeType,
      value    AttributeValue }*/
     uinta attribute_end = 0;
-    code = parse_data_element(raw_cert, DER_SEQUENCE, idx, relative_name_end, &attribute_end);
-    if (code != OK) {
-      return code;
-    }
+    while (attribute_end < relative_name_end) {
+      code = parse_data_element(raw_cert, DER_SEQUENCE, idx, relative_name_end, &attribute_end);
+      if (code != OK) {
+        return code;
+      }
 
-    /*AttributeType ::= OBJECT IDENTIFIER*/
-    uinta attribute_type_end = 0;
-    code = parse_data_element(raw_cert, DER_OID, idx, attribute_end, &attribute_type_end);
-    if (code != OK) {
-      return code;
-    }
+      /*AttributeType ::= OBJECT IDENTIFIER*/
+      uinta attribute_type_end = 0;
+      code = parse_data_element(raw_cert, DER_OID, idx, attribute_end, &attribute_type_end);
+      if (code != OK) {
+        return code;
+      }
 
-    uinta attribute_type_start = *idx;
-    *idx = attribute_type_end;
+      uinta attribute_type_start = *idx;
+      *idx = attribute_type_end;
 
-    /*AttributeValue ::= ANY -- DEFINED BY AttributeType*/
-    uinta attribute_value_end = 0;
-    // TODO: Replace with choice call.
-    code = parse_data_element(raw_cert, 111, idx, attribute_end, &attribute_value_end);
-    if (code != OK) {
-      return code;
-    }
-    if (attribute_end != attribute_value_end) {
-      return TRAILING_DATA;
-    }
-    // TODO: Finish parsing contents.
+      /*AttributeValue ::= ANY -- DEFINED BY AttributeType*/
+      uinta attribute_value_end = 0;
+      // TODO: Replace with choice call.
+      code = parse_data_element(raw_cert, 111, idx, attribute_end, &attribute_value_end);
+      if (code != OK) {
+        return code;
+      }
+      if (attribute_end != attribute_value_end) {
+        return TRAILING_DATA;
+      }
 
-    uinta attribute_value_start = *idx;
-    *idx = attribute_value_end;
+      uinta attribute_value_start = *idx;
+      *idx = attribute_value_end;
+      // TODO: Finish parsing contents.
+    }
+    assert(*idx == relative_name_end);
   }
+  assert(*idx == name_end);
 
   return OK;
 }
@@ -216,6 +222,10 @@ Code parse_x509(byte *raw_cert, uinta raw_cert_size) {
   uinta idx_mem = 0;
   uinta *idx = &idx_mem;
 
+  /*Certificate  ::=  SEQUENCE  {
+        tbsCertificate       TBSCertificate,
+        signatureAlgorithm   AlgorithmIdentifier,
+        signatureValue       BIT STRING  }*/
   uinta cert_end = 0;
   Code code = parse_data_element(raw_cert, DER_SEQUENCE, idx, raw_cert_size, &cert_end);
   if(code != OK) {
@@ -225,12 +235,29 @@ Code parse_x509(byte *raw_cert, uinta raw_cert_size) {
     return TRAILING_DATA;
   }
 
+  /*tbsCertificate       TBSCertificate*/
+  /* TBSCertificate  ::=  SEQUENCE  {
+        version         [0]  EXPLICIT Version DEFAULT v1,
+        serialNumber         CertificateSerialNumber,
+        signature            AlgorithmIdentifier,
+        issuer               Name,
+        validity             Validity,
+        subject              Name,
+        subjectPublicKeyInfo SubjectPublicKeyInfo,
+        issuerUniqueID  [1]  IMPLICIT UniqueIdentifier OPTIONAL,
+                             -- If present, version MUST be v2 or v3
+        subjectUniqueID [2]  IMPLICIT UniqueIdentifier OPTIONAL,
+                             -- If present, version MUST be v2 or v3
+        extensions      [3]  EXPLICIT Extensions OPTIONAL
+                             -- If present, version MUST be v3
+        }*/
   uinta tbs_cert_end = 0;
   code = parse_data_element(raw_cert, DER_SEQUENCE, idx, cert_end, &tbs_cert_end);
   if (code != OK) {
     return code;
   }
 
+  /*version         [0]  EXPLICIT Version DEFAULT v1*/
   uinta version_end = 0;
   code = parse_data_element(raw_cert, DER_INTEGER, idx, tbs_cert_end, &version_end);
   if (code != OK) {
@@ -242,6 +269,7 @@ Code parse_x509(byte *raw_cert, uinta raw_cert_size) {
 
   *idx = version_end;
 
+  /*serialNumber         CertificateSerialNumber*/
   uinta serial_end = 0;
   code = parse_data_element(raw_cert, DER_INTEGER, idx, tbs_cert_end, &serial_end);
   if (code != OK) {
@@ -251,6 +279,7 @@ Code parse_x509(byte *raw_cert, uinta raw_cert_size) {
   // Currently we do not record the serial number of the cert. There is no current plan to use it.
   *idx = serial_end;
 
+  /*signature            AlgorithmIdentifier*/
   PublicKeyBuilder public_key = {0};
   code = parse_alg_id(raw_cert, idx, tbs_cert_end, &public_key);
   if (code != OK) {
@@ -407,15 +436,20 @@ Code parse_x509(byte *raw_cert, uinta raw_cert_size) {
     if (code != OK) {
       return code;
     }
-
-    uinta extn_start = *idx;
-    *idx = extn_end;
-
     if (extn_end != extension_end) {
       return TRAILING_DATA;
     }
 
+    uinta extn_start = *idx;
+    *idx = extn_end;
+
     // TODO: Finish parsing contents.
+  }
+  assert(*idx == extensions_end);
+
+  code = parse_alg_id(raw_cert, idx, tbs_cert_end, &public_key);
+  if (code != OK) {
+    return code;
   }
 
   // TODO: Finish parsing signatures.
