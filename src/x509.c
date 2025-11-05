@@ -37,15 +37,13 @@ typedef struct {
   AlgID id;
 } PublicKeyBuilder;
 
-Code parse_data_element(byte *raw_cert, uint8 expected_identifier, uinta *idx, uinta parent_end,
-                       uinta *ret_content_end) {
+Code parse_any(byte *raw_cert, uinta *idx, uinta parent_end, uinta *ret_content_end,
+               uint8* ret_identifier) {
   if (*idx >= parent_end) {
     return UNEXPECTED_END_OF_DATA;
   }
-  if (raw_cert[*idx] != expected_identifier) {
-    return UNEXPECTED_IDENTIFIER;
-  }
 
+  uint8 identifier = raw_cert[*idx];
   *idx += 1;
 
   if (*idx >= parent_end) {
@@ -54,8 +52,7 @@ Code parse_data_element(byte *raw_cert, uint8 expected_identifier, uinta *idx, u
 
   uinta length_byte = raw_cert[*idx];
 
-  if (length_byte == DER_LENGTH_INDEFINITE ||
-      length_byte == DER_LENGTH_RESERVED) {
+  if (length_byte == DER_LENGTH_INDEFINITE || length_byte == DER_LENGTH_RESERVED) {
     // Disallowed BER length type.
     return INVALID_LENGTH_FORM;
   }
@@ -93,6 +90,113 @@ Code parse_data_element(byte *raw_cert, uint8 expected_identifier, uinta *idx, u
   }
 
   *ret_content_end = *idx + length;
+  *ret_identifier = identifier;
+  return OK;
+}
+
+Code parse_data_element(byte *raw_cert, uint8 expected_identifier, uinta *idx, uinta parent_end,
+                       uinta *ret_content_end) {
+  uint8 identifier = 0;
+  Code code = parse_any(raw_cert, idx, parent_end, ret_content_end, &identifier);
+  if (code != OK) {
+    return code;
+  }
+  if (identifier != expected_identifier) {
+    return UNEXPECTED_IDENTIFIER;
+  }
+  return OK;
+}
+
+Code parse_optional_data(byte *raw_cert, uint8 expected_identifier, uinta *idx, uinta parent_end,
+                         uinta *ret_content_end) {
+  Code code = parse_data_element(raw_cert, expected_identifier, idx, parent_end, ret_content_end);
+  switch (code) {
+  case UNEXPECTED_END_OF_DATA:
+  case UNEXPECTED_IDENTIFIER:
+  case OK:
+    return OK;
+  default:
+    return code;
+  }
+}
+
+/*Time ::= CHOICE {
+      utcTime        UTCTime,
+      generalTime    GeneralizedTime }*/
+Code parse_time(byte *raw_cert, uinta *idx, uinta parent_end, time_t *ret_unix_ts) {
+  const uinta UTCTIME_SIZE = 13;
+  const uinta GENERALIZEDTIME_SIZE = 15;
+
+  // A time_t can theoretically be 32 bits, which would be disatrous as all timestamps would
+  // overflow in 2038. To compensate we will not support compilers that use 32 bit time_t.
+  assert(sizeof(time_t) > 4);
+
+  int ch;
+#define CONVERT_NUM(n, m)                                                                          \
+  {                                                                                                \
+    ch = raw_cert[*idx];                                                                           \
+    if (ch < '0' || ch > '9') {                                                                    \
+      return INVALID_VALIDITY_TIME;                                                                \
+    } else {                                                                                       \
+      *idx += 1;                                                                                   \
+      n += (ch - '0') * (m);                                                                       \
+    }                                                                                              \
+  }
+#define CONVERT_2DIGIT(n)                                                                          \
+  {                                                                                                \
+    CONVERT_NUM(n, 10);                                                                            \
+    CONVERT_NUM(n, 1);                                                                             \
+  }
+
+  struct tm utc = {0};
+  uinta ts_end = 0;
+  Code code = parse_optional_data(raw_cert, DER_UTCTIME, idx, parent_end, &ts_end);
+  if (code != OK) {
+    return code;
+  }
+
+  if (ts_end > 0) {
+    if (*idx + UTCTIME_SIZE != ts_end) {
+      return INVALID_VALIDITY_TIME;
+    }
+
+    CONVERT_2DIGIT(utc.tm_year);
+    utc.tm_year += (utc.tm_year >= 50) ? 1900 : 2000;
+  } else {
+    // GeneralizedTime and UTCTime only differ by 2 YY characters.
+    Code code = parse_data_element(raw_cert, DER_GENERALIZEDTIME, idx, parent_end, &ts_end);
+    if (code != OK) {
+      return code;
+    }
+    if (*idx + GENERALIZEDTIME_SIZE != ts_end) {
+      return INVALID_VALIDITY_TIME;
+    }
+
+    CONVERT_NUM(utc.tm_year, 1000);
+    CONVERT_NUM(utc.tm_year, 100);
+    CONVERT_NUM(utc.tm_year, 10);
+    CONVERT_NUM(utc.tm_year, 1);
+  }
+  CONVERT_2DIGIT(utc.tm_mon);
+  CONVERT_2DIGIT(utc.tm_mday);
+  CONVERT_2DIGIT(utc.tm_hour);
+  CONVERT_2DIGIT(utc.tm_min);
+  CONVERT_2DIGIT(utc.tm_sec);
+  if (raw_cert[*idx] != 'Z') {
+    return INVALID_VALIDITY_TIME;
+  }
+
+  struct tm pre_utc = utc;
+  time_t ret = mktime(&utc);
+  // If mktime altered the date then it was out of range and thus is invalid.
+  if (ret < 0 || pre_utc.tm_year != utc.tm_year || pre_utc.tm_mon != utc.tm_mon ||
+      pre_utc.tm_mday != utc.tm_mday || pre_utc.tm_hour != utc.tm_hour ||
+      pre_utc.tm_min != utc.tm_min || pre_utc.tm_sec != utc.tm_sec) {
+    return INVALID_VALIDITY_TIME;
+  }
+
+  *idx = ts_end;
+  *ret_unix_ts = ret;
   return OK;
 }
 
@@ -129,6 +233,7 @@ Code parse_alg_id(byte *raw_cert, uinta *idx, uinta parent_end, PublicKeyBuilder
 
   return OK;
 }
+
 /*subjectPublicKey     BIT STRING*/
 Code parse_public_key(byte *raw_cert, uinta *idx, uinta parent_end, PublicKeyBuilder *public_key) {
   uinta public_key_end = 0;
@@ -188,8 +293,8 @@ Code parse_name(byte *raw_cert, uinta *idx, uinta parent_end) {
 
       /*AttributeValue ::= ANY -- DEFINED BY AttributeType*/
       uinta attribute_value_end = 0;
-      // TODO: Replace with choice call.
-      code = parse_data_element(raw_cert, 111, idx, attribute_end, &attribute_value_end);
+      uint8 identifier = 0;
+      code = parse_any(raw_cert, idx, attribute_end, &attribute_value_end, &identifier);
       if (code != OK) {
         return code;
       }
@@ -205,96 +310,6 @@ Code parse_name(byte *raw_cert, uinta *idx, uinta parent_end) {
   }
   assert(*idx == name_end);
 
-  return OK;
-}
-
-Code parse_optional_data(byte *raw_cert, uint8 expected_identifier, uinta *idx, uinta parent_end, uinta *ret_content_end) {
-  Code code = parse_data_element(raw_cert, expected_identifier, idx, parent_end, ret_content_end);
-  switch (code) {
-  case UNEXPECTED_END_OF_DATA:
-  case UNEXPECTED_IDENTIFIER:
-  case OK:
-    return OK;
-  default:
-    return code;
-  }
-}
-
-
-/*Time ::= CHOICE {
-      utcTime        UTCTime,
-      generalTime    GeneralizedTime }*/
-Code parse_time(byte *raw_cert, uinta *idx, uinta parent_end, time_t *ret_unix_ts) {
-  const uinta UTCTIME_SIZE = 13;
-  const uinta GENERALIZEDTIME_SIZE = 15;
-
-  int ch;
-#define CONVERT_NUM(n, m)                                                                          \
-  {                                                                                                \
-    ch = raw_cert[*idx];                                                                           \
-    if (ch < '0' || ch > '9') {                                                                    \
-      return INVALID_VALIDITY_TIME;                                                                \
-    } else {                                                                                       \
-      *idx += 1;                                                                                   \
-      n += (ch - '0') * (m);                                                                       \
-    }                                                                                              \
-  }
-#define CONVERT_2DIGIT(n) {CONVERT_NUM(n, 10); CONVERT_NUM(n, 1);}
-
-  // A time_t can theoretically be 32 bits, which would be disatrous as all timestamps would
-  // overflow in 2038. To compensate we will not support compilers that use 32 bit time_t.
-  assert(sizeof(time_t) > 4);
-
-  struct tm utc = {0};
-
-  uinta ts_end = 0;
-  Code code = parse_optional_data(raw_cert, DER_UTCTIME, idx, parent_end, &ts_end);
-  if (code != OK) {
-    return code;
-  }
-
-  if (ts_end > 0) {
-    if (*idx + UTCTIME_SIZE != ts_end) {
-      return INVALID_VALIDITY_TIME;
-    }
-
-    CONVERT_2DIGIT(utc.tm_year);
-    utc.tm_year += (utc.tm_year >= 50) ? 1900 : 2000;
-  } else {
-    // GeneralizedTime and UTCTime only differ by 2 YY characters.
-    Code code = parse_data_element(raw_cert, DER_GENERALIZEDTIME, idx, parent_end, &ts_end);
-    if (code != OK) {
-      return code;
-    }
-    if (*idx + GENERALIZEDTIME_SIZE != ts_end) {
-      return INVALID_VALIDITY_TIME;
-    }
-
-    CONVERT_NUM(utc.tm_year, 1000);
-    CONVERT_NUM(utc.tm_year, 100);
-    CONVERT_NUM(utc.tm_year, 10);
-    CONVERT_NUM(utc.tm_year, 1);
-  }
-  CONVERT_2DIGIT(utc.tm_mon);
-  CONVERT_2DIGIT(utc.tm_mday);
-  CONVERT_2DIGIT(utc.tm_hour);
-  CONVERT_2DIGIT(utc.tm_min);
-  CONVERT_2DIGIT(utc.tm_sec);
-  if (raw_cert[*idx] != 'Z') {
-    return INVALID_VALIDITY_TIME;
-  }
-
-  struct tm pre_utc = utc;
-  time_t ret = mktime(&utc);
-  // If mktime altered the date then it was out of range and thus is invalid.
-  if (ret < 0 || pre_utc.tm_year != utc.tm_year || pre_utc.tm_mon != utc.tm_mon ||
-      pre_utc.tm_mday != utc.tm_mday || pre_utc.tm_hour != utc.tm_hour ||
-      pre_utc.tm_min != utc.tm_min || pre_utc.tm_sec != utc.tm_sec) {
-    return INVALID_VALIDITY_TIME;
-  }
-
-  *idx = ts_end;
-  *ret_unix_ts = ret;
   return OK;
 }
 
@@ -415,11 +430,13 @@ Code parse_x509(byte *raw_cert, uinta raw_cert_size) {
     return code;
   }
 
+  /*algorithm            AlgorithmIdentifier*/
   code = parse_alg_id(raw_cert, idx, public_key_info_end, &public_key);
   if (code != OK) {
     return code;
   }
 
+  /*subjectPublicKey     BIT STRING*/
   code = parse_public_key(raw_cert, idx, public_key_info_end, &public_key);
   if (code != OK) {
     return code;
