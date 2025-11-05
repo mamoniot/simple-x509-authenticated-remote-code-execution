@@ -95,8 +95,8 @@ typedef int32  inta;
 #define for_each_in(type, name, array, size) type* UNIQUE_NAME(name) = (array) + (size); for(type* name = (array); name != UNIQUE_NAME(name); name += 1)
 #define for_each_in_rev(type, name, array, size) type* UNIQUE_NAME(name) = (array) - 1; for(type* name = (array) + (size) - 1; name != UNIQUE_NAME(name); name -= 1)
 
-#define for_each_idx(type, name, name_ptr, array, size) inta UNIQUE_NAME(name) = (size); type name_ptr = (array); for(inta name = 0; name < UNIQUE_NAME(name); (name += 1, name_ptr += 1))
-#define for_each_idx_rev(type, name, name_ptr, array, size) inta UNIQUE_NAME(name) = (size); type name_ptr = (array) + UNIQUE_NAME(name) - 1; for(inta name = UNIQUE_NAME(name) - 1; name >= 0; (name -= 1, name_ptr -= 1))
+#define for_each_idx(type, name, name_ptr, array, size) inta UNIQUE_NAME(name) = (size); type* name_ptr = (array); for(inta name = 0; name < UNIQUE_NAME(name); (name += 1, name_ptr += 1))
+#define for_each_idx_rev(type, name, name_ptr, array, size) inta UNIQUE_NAME(name) = (size); type* name_ptr = (array) + UNIQUE_NAME(name) - 1; for(inta name = UNIQUE_NAME(name) - 1; name >= 0; (name -= 1, name_ptr -= 1))
 #endif
 
 #endif
