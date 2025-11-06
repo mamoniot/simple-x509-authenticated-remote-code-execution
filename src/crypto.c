@@ -4,21 +4,6 @@
 
 #include "crypto.h"
 
-struct PubKey {
-  uint32 alg_idx;
-  union {
-    struct {
-      EVP_PKEY *pkey;
-    } ed25519;
-    struct {
-
-    } rsa;
-    struct {
-
-    } ecdsa;
-  };
-};
-
 typedef struct {
   const byte *oid;
   uinta oid_size;

@@ -1,3 +1,6 @@
+#ifndef X509__H_INCLUDE
+#define X509__H_INCLUDE
+
 #include "basic.h"
 
 const uinta IDX_NONE = 0;
@@ -67,3 +70,7 @@ typedef enum {
   UNRECOGNIZED_CRITICAL_EXTN,
   EXPLICIT_DEFAULT,
 } StatusCode;
+
+StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields *ret_x509);
+
+#endif
