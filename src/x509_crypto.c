@@ -29,10 +29,7 @@ bool extract_self_sign(byte *raw_cert, const x509Fields *fields, time_t now, Pub
     return false;
   }
 
-  if (!pub_key_verify(ret_pub_key, &raw_cert[fields->signed_data_start],
+  return pub_key_verify(ret_pub_key, &raw_cert[fields->signed_data_start],
       fields->signed_data_end - fields->signed_data_start, &raw_cert[fields->sig_start],
-      fields->sig_end - fields->sig_start)) {
-    return false;
-  }
-  return true;
+      fields->sig_end - fields->sig_start);
 }

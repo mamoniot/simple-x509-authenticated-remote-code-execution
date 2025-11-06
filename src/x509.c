@@ -191,22 +191,6 @@ StatusCode parse_time(byte *raw_cert, uinta *idx, uinta parent_end, time_t *ret_
   return OK;
 }
 
-StatusCode parse_alg_params(byte *raw_cert, uinta alg_oid_start, uinta alg_oid_end, uinta alg_id_end,
-                      uinta *alg_idx) {
-  uinta alg_oid_size = alg_oid_end - alg_oid_start;
-  for_each_idx(const SupportedAlg, idx, alg, supported_algs, supported_algs_size) {
-    if (alg->oid_size == alg_oid_size && memcmp(alg->oid, &raw_cert[alg_oid_start], alg_oid_size) == 0) {
-      if (alg->parse_params(raw_cert, alg_oid_end, alg_id_end)) {
-        *alg_idx = idx;
-        return OK;
-      } else {
-        return INVALID_SIG_PARAMS;
-      }
-    }
-  }
-  return UNKNOWN_SIG_ID;
-}
-
 /*AlgorithmIdentifier  ::=  SEQUENCE  {
         algorithm               OBJECT IDENTIFIER,
         parameters              ANY DEFINED BY algorithm OPTIONAL  }*/
