@@ -2,9 +2,7 @@
 #include "time.h"
 #include "string.h"
 
-#include "basic.h"
 #include "crypto.h"
-#include "x509.h"
 
 #define MAX_EXTN 64
 
@@ -297,7 +295,7 @@ StatusCode parse_name(byte *raw_cert, uinta *idx, uinta parent_end) {
   return OK;
 }
 
-StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509* ret_x509) {
+StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields* ret_x509) {
   uinta idx_mem = 0;
   uinta *idx = &idx_mem;
 

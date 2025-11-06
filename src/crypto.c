@@ -1,5 +1,38 @@
 #include "crypto.h"
-#include <linux/limits.h>
+#include "openssl/ssl.h"
+
+typedef enum {
+  ALG_NONE = 0,
+  ED25519,
+  ED448,
+  ALG_RSA,
+  ECDSA,
+} AlgID;
+
+struct PubKey {
+  AlgID id;
+  union {
+    struct {
+
+    } ed25519;
+    struct {
+
+    } rsa;
+    struct {
+
+    } ecdsa;
+  };
+};
+
+bool pub_key_extract(byte *raw_cert, const x509Fields *fields, PubKey *ret_pub_key) {
+
+}
+
+bool pub_key_verify(PubKey *pub_key, const byte *data, uinta data_size, const byte *sig,
+                    uinta sig_size) {
+  
+}
+
 
 bool parse_empty(byte *raw_cert, uinta params_start, uinta params_end) {
   return params_start == params_end;

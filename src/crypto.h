@@ -1,18 +1,12 @@
 #include "basic.h"
+#include "x509.h"
 
-// typedef enum {
-//   SIG_NONE = 0,
-//   ED25519,
-//   RSA,
-//   ECDSA,
-// } SigID;
+typedef struct PubKey PubKey;
 
-// typedef enum {
-//   HASH_NONE = 0,
-//   SHA2_256,
-//   SHA2_384,
-//   SHA2_512,
-// } HashID;
+bool pub_key_extract(byte *raw_cert, const x509Fields *fields, PubKey *ret_pub_key);
+
+bool pub_key_verify(PubKey *pub_key, const byte *data, uinta data_size, const byte *sig,
+                    uinta sig_size);
 
 typedef struct {
   const byte *oid;
