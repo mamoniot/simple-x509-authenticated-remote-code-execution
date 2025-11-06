@@ -7,11 +7,10 @@
 typedef struct {
   const byte *oid;
   uinta oid_size;
+  uinta exp_sig_size;
   bool (*extract_key)(byte *, const x509Fields *, PubKey *);
   bool (*verify_sig)(PubKey *, const byte *, uinta, const byte *,
                      uinta);
-  // SigID sig_id;
-  // HashID hash_id;
 } SupportedAlg;
 
 bool ed25519_extract(byte *raw_cert, const x509Fields *fields, PubKey *ret_pub_key) {
@@ -50,12 +49,12 @@ bool ed25519_verify(PubKey *pub_key, const byte *data, uinta data_size, const by
 
 #define TABULATE(...) {__VA_ARGS__}
 
-#define DECL_ALG(name, oid)                                                                        \
+#define DECL_ALG(name, size, oid)                                                                  \
   static const byte MACRO_CAT(name, _oid)[] = oid;                                                 \
-  static const SupportedAlg name = {MACRO_CAT(name, _oid), sizeof(MACRO_CAT(name, _oid)),          \
+  static const SupportedAlg name = {MACRO_CAT(name, _oid), sizeof(MACRO_CAT(name, _oid)), size,    \
                                     MACRO_CAT(name, _extract)};
 
-DECL_ALG(ed25519, TABULATE(0x06, 0x03, 0x2b, 0x65, 0x70));
+DECL_ALG(ed25519, 32, TABULATE(0x06, 0x03, 0x2b, 0x65, 0x70));
 
 const SupportedAlg supported_algs[] = {ed25519};
 const uinta supported_algs_size = sizeof(supported_algs) / sizeof(supported_algs[0]);

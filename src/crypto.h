@@ -1,16 +1,15 @@
 #ifndef CRYPTO__H_INCLUDE
 #define CRYPTO__H_INCLUDE
 
-#include "openssl/evp.h"
-
 #include "basic.h"
 #include "x509.h"
 
 typedef struct PubKey {
+  uinta exp_sig_size;
   uint32 alg_idx;
   union {
     struct {
-      EVP_PKEY *pkey;
+      void *pkey;
     } ed25519;
     struct {
 
