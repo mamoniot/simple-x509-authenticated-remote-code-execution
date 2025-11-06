@@ -34,7 +34,7 @@ typedef struct {
   uinta akid_end;
 
   bool key_cert_sign;
-  uint32 path_len_constraint;
+  // uint32 path_len_constraint;
 } x509;
 
 typedef enum {
@@ -51,4 +51,8 @@ typedef enum {
   MISMATCHED_SIG_ID,
   UNKNOWN_SIG_ID,
   INVALID_SIG_PARAMS,
-} Code;
+  EXCEEDS_MAX_EXTNS,
+  DUPLICATE_EXTNS,
+  UNRECOGNIZED_CRITICAL_EXTN,
+  EXPLICIT_DEFAULT,
+} StatusCode;
