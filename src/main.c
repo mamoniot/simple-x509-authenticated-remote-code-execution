@@ -21,13 +21,13 @@ const uint16 TCP_PORT = 59261;
 void exec_script(byte *script, uinta script_size) {
   int in_pipe[2] = {0};
   if (pipe(in_pipe) < 0) {
-    printf("TODO\n");
+    printf("Failed to create a pipe for executing the remote bash script\n");
     return;
   }
 
   pid_t pid = fork();
   if (pid < 0) {
-    printf("TODO\n");
+    printf("Failed to create a child process for the remote bash script\n");
     return;
   }
 
@@ -39,11 +39,11 @@ void exec_script(byte *script, uinta script_size) {
     close(in_pipe[0]);
     close(in_pipe[1]);
 
-    const char* bash = "bash";
-    exit(execlp(bash, bash, NULL));
+    const char* BASH = "bash";
+    exit(execlp(BASH, BASH, NULL));
   }
 
-  printf("TODO Success\n");
+  printf("Remote bash script received and verified, executing now...\n");
   write(in_pipe[1], script, script_size);
 
   close(in_pipe[0]);
@@ -139,7 +139,7 @@ int main(int argc, char *argv[]) {
 
   int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
   if (sock_fd < 0) {
-    printf("TODO\n");
+    printf("Failed to open a TCP socket\n");
     return -1;
   }
 
@@ -150,12 +150,12 @@ int main(int argc, char *argv[]) {
 
   if (bind(sock_fd, cast(struct sockaddr *, &server_addr), sizeof(server_addr)) < 0) {
     close(sock_fd);
-    printf("TODO\n");
+    printf("Failed to bind a TCP socket to port %d\n", TCP_PORT);
     return -1;
   }
   if (listen(sock_fd, TCP_BACKLOG) < 0) {
     close(sock_fd);
-    printf("TODO\n");
+    printf("Failed to listen for TCP connections\n");
     return -1;
   }
 
@@ -171,7 +171,7 @@ int main(int argc, char *argv[]) {
       if (errno == EINTR) {
         continue;
       }
-      printf("TODO\n");
+      printf("Failed to accept a TCP connection\n");
       break;
     }
 
@@ -181,10 +181,10 @@ int main(int argc, char *argv[]) {
       if (ret < 0) {
         close(sock_fd);
         close(conn_fd);
-        printf("TODO\n");
+        printf("Failed to receive data from a TCP connection\n");
         return -1;
       } else if (ret == 0) {
-        // Null terminate the buffer for later.
+        // Null terminate the buffer for safety. It should go unused.
         assert(buf_size < buf_cap);
         buf[buf_size] = 0;
         buf_size += 1;
@@ -210,19 +210,18 @@ int main(int argc, char *argv[]) {
     uinta script_start = pub_key.exp_sig_size + 1;
     uinta script_end = buf_size - 1;
     if (script_start < script_end && buf[sig_end] == '\n') {
-      // The script is null terminated, but the null terminator is not included in the size.
       byte *script = &buf[script_start];
       uinta script_size = script_end - script_start;
       if (pub_key_verify(&pub_key, script, script_size, buf, sig_end)) {
         // The signature is valid, so execute the script.
         exec_script(script, script_size);
       } else {
-        printf("TODO\n");
+        printf("Remote bash script had an invalid signature, aborting execution\n");
       }
     } else if (script_start == script_end) {
-      printf("TODO\n");
+      printf("Remote bash script was empty, aborting execution\n");
     } else {
-      printf("TODO\n");
+      printf("Remote bash script did not contain a signature, aborting execution\n");
     }
   }
 
