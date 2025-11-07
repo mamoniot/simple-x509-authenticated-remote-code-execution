@@ -89,7 +89,7 @@ int main(int argc, char *argv[]) {
     if (extract_self_sign(raw_cert, &fields, time(NULL), &pub_key)) {
       is_pub_key_populated = true;
     } else {
-      printf("The cerficate had an invalid signature");
+      printf("The cerficate had an invalid signature\n");
     }
     break;
   case UNEXPECTED_END_OF_DATA:
@@ -133,98 +133,100 @@ int main(int argc, char *argv[]) {
   munmap(raw_cert, raw_cert_size);
   close(fd);
 
-  if (is_pub_key_populated) {
-    int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock_fd < 0) {
+  if (!is_pub_key_populated) {
+    return -1;
+  }
+
+  int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (sock_fd < 0) {
+    printf("TODO\n");
+    return -1;
+  }
+
+  struct sockaddr_in server_addr = {0};
+  server_addr.sin_addr.s_addr = INADDR_ANY;
+  server_addr.sin_family = AF_INET;
+  server_addr.sin_port = TCP_PORT;
+
+  if (bind(sock_fd, cast(struct sockaddr *, &server_addr), sizeof(server_addr)) < 0) {
+    close(sock_fd);
+    printf("TODO\n");
+    return -1;
+  }
+  if (listen(sock_fd, TCP_BACKLOG) < 0) {
+    close(sock_fd);
+    printf("TODO\n");
+    return -1;
+  }
+
+  byte *buf = malloc(KILOBYTE);
+  uinta buf_cap = KILOBYTE;
+
+  while (true) {
+    struct sockaddr_in clien_addr;
+    socklen_t clien_addr_size = sizeof(clien_addr);
+    int conn_fd =
+        accept(sock_fd, cast(struct sockaddr *, &clien_addr), &clien_addr_size);
+    if (conn_fd < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
       printf("TODO\n");
-      return -1;
+      break;
     }
 
-    struct sockaddr_in server_addr = {0};
-    server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = TCP_PORT;
-
-    if (bind(sock_fd, cast(struct sockaddr *, &server_addr), sizeof(server_addr)) < 0) {
-      close(sock_fd);
-      printf("TODO\n");
-      return -1;
-    }
-    if (listen(sock_fd, TCP_BACKLOG) < 0) {
-      close(sock_fd);
-      printf("TODO\n");
-      return -1;
-    }
-
-    byte *buf = malloc(KILOBYTE);
-    uinta buf_cap = KILOBYTE;
-
+    uinta buf_size = 0;
     while (true) {
-      struct sockaddr_in clien_addr;
-      socklen_t clien_addr_size = sizeof(clien_addr);
-      int conn_fd =
-          accept(sock_fd, cast(struct sockaddr *, &clien_addr), &clien_addr_size);
-      if (conn_fd < 0) {
-        if (errno == EINTR) {
-          continue;
-        }
+      inta ret = recv(conn_fd, &buf[buf_size], buf_cap - buf_size, MSG_TRUNC);
+      if (ret < 0) {
+        close(sock_fd);
+        close(conn_fd);
         printf("TODO\n");
+        return -1;
+      } else if (ret == 0) {
+        // Null terminate the buffer for later.
+        assert(buf_size < buf_cap);
+        buf[buf_size] = 0;
+        buf_size += 1;
         break;
-      }
-
-      uinta buf_size = 0;
-      while (true) {
-        inta ret = recv(conn_fd, &buf[buf_size], buf_cap - buf_size, MSG_TRUNC);
-        if (ret < 0) {
-          close(sock_fd);
-          close(conn_fd);
-          printf("TODO\n");
-          return -1;
-        } else if (ret == 0) {
-          // Null terminate the buffer for later.
-          assert(buf_size < buf_cap);
-          buf[buf_size] = 0;
-          buf_size += 1;
-          break;
-        } else {
-          buf_size += ret;
-          if (buf_size == buf_cap) {
-            // NOTE: In a production environment this growth should be capped and OOM checked.
-            buf_cap *= 2;
-            buf = realloc(buf, buf_cap);
-          }
+      } else {
+        buf_size += ret;
+        if (buf_size == buf_cap) {
+          // NOTE: In a production environment this growth should be capped and OOM checked.
+          buf_cap *= 2;
+          buf = realloc(buf, buf_cap);
         }
       }
+    }
 
-      /*A bash script whose 1st line is the signature of the rest of the bash file.*/
-      // A raw public key signature may and often will incidentally contain a newline character. So
-      // we need a way to tell apart an incidental newline from the newline separating the signature
-      // and the script. One option is to use an encoding scheme for the signature, but this is
-      // dangerous as it introduces nonstandard complexity and ambiguity. Instead, since
-      // signatures are fixed-size, we can interpret every input byte less than the signature size
-      // as unambiguously part of the signature.
-      uinta sig_end = pub_key.exp_sig_size;
-      uinta script_start = pub_key.exp_sig_size + 1;
-      uinta script_end = buf_size - 1;
-      if (script_start < script_end && buf[sig_end] == '\n') {
-        // The script is null terminated, but the null terminator is not included in the size.
-        byte *script = &buf[script_start];
-        uinta script_size = script_end - script_start;
-        if (pub_key_verify(&pub_key, script, script_size, buf, sig_end)) {
-          // The signature is valid, so execute the script.
-          exec_script(script, script_size);
-        } else {
-          printf("TODO\n");
-        }
-      } else if (script_start == script_end) {
-        printf("TODO\n");
+    /*A bash script whose 1st line is the signature of the rest of the bash file.*/
+    // A raw public key signature may and often will incidentally contain a newline character. So
+    // we need a way to tell apart an incidental newline from the newline separating the signature
+    // and the script. One option is to use an encoding scheme for the signature, but this is
+    // dangerous as it introduces nonstandard complexity and ambiguity. Instead, since
+    // signatures are fixed-size, we can interpret every input byte less than the signature size
+    // as unambiguously part of the signature.
+    uinta sig_end = pub_key.exp_sig_size;
+    uinta script_start = pub_key.exp_sig_size + 1;
+    uinta script_end = buf_size - 1;
+    if (script_start < script_end && buf[sig_end] == '\n') {
+      // The script is null terminated, but the null terminator is not included in the size.
+      byte *script = &buf[script_start];
+      uinta script_size = script_end - script_start;
+      if (pub_key_verify(&pub_key, script, script_size, buf, sig_end)) {
+        // The signature is valid, so execute the script.
+        exec_script(script, script_size);
       } else {
         printf("TODO\n");
       }
+    } else if (script_start == script_end) {
+      printf("TODO\n");
+    } else {
+      printf("TODO\n");
     }
-
-    close(sock_fd);
   }
+
+  close(sock_fd);
 
   return 0;
 }

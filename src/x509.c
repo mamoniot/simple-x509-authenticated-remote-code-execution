@@ -323,7 +323,7 @@ StatusCode parse_time(byte *raw_cert, uinta *idx, uinta parent_end, time_t *ret_
     }
 
     CONVERT_2DIGIT(utc.tm_year);
-    utc.tm_year += (utc.tm_year >= 50) ? 1900 : 2000;
+    utc.tm_year += cast(int, utc.tm_year < 50) * 100;
   } else {
     // GeneralizedTime and UTCTime only differ by 2 YY characters.
     StatusCode code = parse_data_element(raw_cert, DER_GENERALIZEDTIME, idx, parent_end, &ts_end);
@@ -348,8 +348,11 @@ StatusCode parse_time(byte *raw_cert, uinta *idx, uinta parent_end, time_t *ret_
     return INVALID_VALIDITY_TIME;
   }
 
+  // Convert month. This can overflow but timegm will catch that.
+  utc.tm_mon -= 1;
+
   struct tm pre_utc = utc;
-  time_t ret = mktime(&utc);
+  time_t ret = timegm(&utc);
   // If mktime altered the date then it was out of range and thus is invalid.
   if (ret < 0 || pre_utc.tm_year != utc.tm_year || pre_utc.tm_mon != utc.tm_mon ||
       pre_utc.tm_mday != utc.tm_mday || pre_utc.tm_hour != utc.tm_hour ||
