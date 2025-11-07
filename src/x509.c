@@ -90,7 +90,7 @@ StatusCode parse_any(byte *raw_cert, uinta *idx, uinta parent_end, uinta *ret_co
     }
   } else {
     // Definite short form length.
-    length = length_byte & ~DER_LENGTH_FORM_MASK;
+    length = length_byte;
   }
 
   // This check must not overflow.
@@ -134,8 +134,7 @@ StatusCode parse_optional_data(byte *raw_cert, uint8 expected_identifier, uinta 
   }
 }
 
-StatusCode parse_default_bool(byte *raw_cert, uinta *idx,
-                               uinta parent_end, bool *ret_bool) {
+StatusCode parse_default_bool(byte *raw_cert, uinta *idx, uinta parent_end, bool *ret_bool) {
   /*cA               BOOLEAN DEFAULT FALSE*/
   uinta bool_end = IDX_NONE;
   StatusCode code = parse_optional_data(raw_cert, DER_BOOLEAN, idx, parent_end, &bool_end);
@@ -154,6 +153,26 @@ StatusCode parse_default_bool(byte *raw_cert, uinta *idx,
     *ret_bool = false;
   }
 
+  return OK;
+}
+
+// There is no modern public key algorithm that has a key or signature size that does not align with
+// 8 bits. So we can safely discard the certificate if we encounter a bitstring with unused bits.
+StatusCode parse_bitstring_no_unused(byte *raw_cert, uinta *idx, uinta parent_end,
+                                     uinta *ret_content_end) {
+  /*subjectPublicKey     BIT STRING*/
+  StatusCode code = parse_data_element(raw_cert, DER_BITSTRING, idx, parent_end, ret_content_end);
+  if (code != OK) {
+    return code;
+  }
+  if (*idx >= *ret_content_end) {
+    return UNEXPECTED_END_OF_DATA;
+  }
+  if (raw_cert[*idx] != 0) {
+    return TRAILING_DATA;
+  }
+
+  *idx += 1;
   return OK;
 }
 
@@ -589,7 +608,8 @@ StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields* ret_field
   }
 
   /*subjectPublicKey     BIT STRING*/
-  code = parse_data_element(raw_cert, DER_BITSTRING, idx, public_key_info_end, &ret_fields->pub_key_end);
+  code = parse_bitstring_no_unused(raw_cert, idx, public_key_info_end,
+                                   &ret_fields->pub_key_end);
   if (code != OK) {
     return code;
   }
@@ -756,7 +776,7 @@ StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields* ret_field
   *idx += sig_id_size;
 
   /*signatureValue       BIT STRING*/
-  code = parse_data_element(raw_cert, DER_BITSTRING, idx, cert_end, &ret_fields->sig_end);
+  code = parse_bitstring_no_unused(raw_cert, idx, cert_end, &ret_fields->sig_end);
   if (code != OK) {
     return code;
   }

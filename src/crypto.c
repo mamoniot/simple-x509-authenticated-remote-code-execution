@@ -51,20 +51,21 @@ bool ed25519_verify(PubKey *pub_key, const byte *data, uinta data_size, const by
 #define DECL_ALG(name, size, oid)                                                                  \
   static const byte MACRO_CAT(name, _oid)[] = oid;                                                 \
   static const SupportedAlg name = {MACRO_CAT(name, _oid), sizeof(MACRO_CAT(name, _oid)), size,    \
-                                    MACRO_CAT(name, _extract)};
+                                    MACRO_CAT(name, _extract), MACRO_CAT(name, _verify)};
 
-DECL_ALG(ed25519, 32, TABULATE(0x06, 0x03, 0x2b, 0x65, 0x70));
+DECL_ALG(ed25519, 64, TABULATE(0x2b, 0x65, 0x70));
 
 const SupportedAlg supported_algs[] = {ed25519};
 const uinta supported_algs_size = sizeof(supported_algs) / sizeof(supported_algs[0]);
 
 
 bool pub_key_extract(byte *raw_cert, const x509Fields *fields, PubKey *ret_pub_key) {
-  uinta pub_key_size = fields->pub_key_oid_end - fields->pub_key_start;
+  uinta pub_key_size = fields->pub_key_oid_end - fields->pub_key_oid_start;
   for_each_idx(const SupportedAlg, idx, alg, supported_algs, supported_algs_size) {
     if (alg->oid_size == pub_key_size &&
-        memcmp(alg->oid, &raw_cert[fields->pub_key_start], pub_key_size) == 0) {
-        return alg->extract_key(raw_cert, fields, ret_pub_key);
+        memcmp(alg->oid, &raw_cert[fields->pub_key_oid_start], pub_key_size) == 0) {
+      ret_pub_key->alg_idx = idx;
+      return alg->extract_key(raw_cert, fields, ret_pub_key);
     }
   }
   return false;
@@ -73,7 +74,11 @@ bool pub_key_extract(byte *raw_cert, const x509Fields *fields, PubKey *ret_pub_k
 bool pub_key_verify(PubKey *pub_key, const byte *data, uinta data_size, const byte *sig,
                     uinta sig_size) {
   assert(pub_key->alg_idx < supported_algs_size);
-  return supported_algs[pub_key->alg_idx].verify_sig(pub_key, data, data_size, sig, sig_size);
+  const SupportedAlg* alg = &supported_algs[pub_key->alg_idx];
+  if (alg->exp_sig_size != sig_size) {
+    return false;
+  }
+  return alg->verify_sig(pub_key, data, data_size, sig, sig_size);
 }
 
 bool certcmp(byte *raw_cert, uinta start0, uinta end0, uinta start1, uinta end1) {
