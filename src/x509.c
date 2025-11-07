@@ -1,14 +1,11 @@
 #include "assert.h"
+#include "basic.h"
 #include "time.h"
 #include "string.h"
 
 #include "x509.h"
 
 #define MAX_EXTN 64
-
-const byte extn_basic_constraint_oid[] = {0x06, 0x03, 0x55, 0x1d, 0x13};
-const byte extn_akid_oid[] = {0x06, 0x03, 0x55, 0x1d, 0x23};
-const byte extn_skid_oid[] = {0x06, 0x03, 0x55, 0x1d, 0x0e};
 
 const byte DER_CONSTRUCTED = 0b00100000;
 const byte DER_BOOLEAN = 1;
@@ -21,11 +18,27 @@ const byte DER_SET = DER_CONSTRUCTED | 17;
 const byte DER_UTCTIME = 23;
 const byte DER_GENERALIZEDTIME = 24;
 
+const byte DER_EXPLICIT_0 = 0b10100000;
+const byte DER_IMPLICIT_0 = 0b10000000;
+const byte DER_IMPLICIT_1 = 0b10000001;
+const byte DER_IMPLICIT_2 = 0b10000010;
+const byte DER_EXPLICIT_3 = 0b10100011;
+
 const byte DER_LENGTH_FORM_MASK = 0b10000000;
 const byte DER_LENGTH_INDEFINITE = 0b10000000;
 const byte DER_LENGTH_RESERVED = 0b11111111;
 
 const byte X509_ACCEPTED_VERSION = 2;
+
+typedef struct {
+  const byte *oid;
+  uinta oid_size;
+  // 0b00 implies extn can have any criticality.
+  // 0b10 implies extn must not be critical.
+  // 0b11 implies extn must be critical.
+  int criticality;
+  StatusCode (*parse_extn)(byte *, uinta, uinta, x509Fields *);
+} SupportedExtn;
 
 
 StatusCode parse_any(byte *raw_cert, uinta *idx, uinta parent_end, uinta *ret_content_end,
@@ -38,10 +51,10 @@ StatusCode parse_any(byte *raw_cert, uinta *idx, uinta parent_end, uinta *ret_co
   *idx += 1;
 
   if (*idx >= parent_end) {
-    return INVALID_END_OF_DATA;
+    return UNEXPECTED_END_OF_DATA;
   }
 
-  uinta length_byte = raw_cert[*idx];
+  byte length_byte = raw_cert[*idx];
 
   if (length_byte == DER_LENGTH_INDEFINITE || length_byte == DER_LENGTH_RESERVED) {
     // Disallowed BER length type.
@@ -53,13 +66,17 @@ StatusCode parse_any(byte *raw_cert, uinta *idx, uinta parent_end, uinta *ret_co
 
   if ((length_byte & DER_LENGTH_FORM_MASK) > 0) {
     // Definite long form length.
-    int32 length_octets = length_byte & !DER_LENGTH_FORM_MASK;
+    int32 length_octets = length_byte & ~DER_LENGTH_FORM_MASK;
     if (*idx + length_octets > parent_end) {
-      return INVALID_END_OF_DATA;
+      return UNEXPECTED_END_OF_DATA;
     }
     if (raw_cert[*idx] == 0) {
       // This check is not strictly necessary, but is still specified by DER.
       return INVALID_LENGTH_FORM;
+    }
+    if (length_octets > 8) {
+      // We do not want to overflow on user input.
+      return UNEXPECTED_END_OF_DATA;
     }
 
     for_each_lt(i, length_octets) {
@@ -68,16 +85,17 @@ StatusCode parse_any(byte *raw_cert, uinta *idx, uinta parent_end, uinta *ret_co
     }
 
     if (length <= 127) {
-      // This check is not strictly necessary, but is still specified by DER.
+      // Should have used short form.
       return INVALID_LENGTH_FORM;
     }
   } else {
     // Definite short form length.
-    length = length_byte & !DER_LENGTH_FORM_MASK;
+    length = length_byte & ~DER_LENGTH_FORM_MASK;
   }
 
-  if (*idx + length > parent_end) {
-    return INVALID_LENGTH_TOO_LONG;
+  // This check must not overflow.
+  if (length > parent_end - *idx) {
+    return UNEXPECTED_END_OF_DATA;
   }
 
   *ret_content_end = *idx + length;
@@ -100,16 +118,169 @@ StatusCode parse_data_element(byte *raw_cert, uint8 expected_identifier, uinta *
 
 StatusCode parse_optional_data(byte *raw_cert, uint8 expected_identifier, uinta *idx, uinta parent_end,
                          uinta *ret_content_end) {
+  uinta pre_idx = *idx;
+  uinta pre_end = *ret_content_end;
   StatusCode code = parse_data_element(raw_cert, expected_identifier, idx, parent_end, ret_content_end);
   switch (code) {
   case UNEXPECTED_END_OF_DATA:
   case UNEXPECTED_IDENTIFIER:
+    // Nondeterministic rollback.
+    *idx = pre_idx;
+    *ret_content_end = pre_end;
   case OK:
     return OK;
   default:
     return code;
   }
 }
+
+StatusCode parse_default_bool(byte *raw_cert, uinta *idx,
+                               uinta parent_end, bool *ret_bool) {
+  /*cA               BOOLEAN DEFAULT FALSE*/
+  uinta bool_end = IDX_NONE;
+  StatusCode code = parse_optional_data(raw_cert, DER_BOOLEAN, idx, parent_end, &bool_end);
+  if (code != OK) {
+    return code;
+  }
+
+  if (bool_end != IDX_NONE) {
+    if (bool_end != *idx + 1 || raw_cert[*idx] != 0xff) {
+      return INVALID_BOOLEAN;
+    }
+
+    *ret_bool = true;
+    *idx = bool_end;
+  } else {
+    *ret_bool = false;
+  }
+
+  return OK;
+}
+
+/*basicConstraint  ::=  SEQUENCE  {
+  cA               BOOLEAN DEFAULT FALSE,
+  pathLenContraint INTEGER DEFAULT INFINITY,
+}*/
+StatusCode parse_basic_constraint(byte *raw_cert, uinta idx, uinta extn_end,
+                                  x509Fields *ret_fields) {
+  uinta constraint_end = 0;
+  StatusCode code = parse_data_element(raw_cert, DER_SEQUENCE, &idx, extn_end, &constraint_end);
+  if (code != OK) {
+    return code;
+  }
+
+  /*cA               BOOLEAN DEFAULT FALSE*/
+  code = parse_default_bool(raw_cert, &idx, constraint_end, &ret_fields->key_cert_sign);
+  if (code != OK) {
+    return code;
+  }
+
+  if (ret_fields->key_cert_sign) {
+    /*pathLenContraint INTEGER DEFAULT INFINITY*/
+    uinta path_end = IDX_NONE;
+    code = parse_optional_data(raw_cert, DER_INTEGER, &idx, constraint_end, &path_end);
+    if (code != OK) {
+      return code;
+    }
+
+    if (path_end != IDX_NONE) {
+      // TODO: Handle path_len_constraint
+      idx = path_end;
+    }
+  }
+  if (idx != extn_end) {
+    return TRAILING_DATA;
+  }
+
+  return OK;
+}
+
+/*AuthorityKeyIdentifier ::= SEQUENCE {
+      keyIdentifier             [0] KeyIdentifier           OPTIONAL,
+      authorityCertIssuer       [1] GeneralNames            OPTIONAL,
+      authorityCertSerialNumber [2] CertificateSerialNumber OPTIONAL  }*/
+StatusCode parse_akid(byte *raw_cert, uinta idx, uinta extn_end, x509Fields *ret_fields) {
+  uinta akid_seq_end = 0;
+  StatusCode code = parse_data_element(raw_cert, DER_SEQUENCE, &idx, extn_end, &akid_seq_end);
+  if (code != OK) {
+    return code;
+  }
+  if (akid_seq_end != extn_end) {
+    return TRAILING_DATA;
+  }
+
+  /*keyIdentifier             [0] KeyIdentifier           OPTIONAL*/
+  /*KeyIdentifier ::= OCTET STRING*/
+  ret_fields->akid_end = IDX_NONE;
+  code = parse_optional_data(raw_cert, DER_IMPLICIT_0, &idx, akid_seq_end, &ret_fields->akid_end);
+  if (code != OK) {
+    return code;
+  }
+
+  if (ret_fields->akid_end != IDX_NONE) {
+    ret_fields->akid_start = idx;
+    idx = ret_fields->akid_end;
+  }
+
+  /*authorityCertIssuer       [1] GeneralNames            OPTIONAL*/
+  uinta aci_end = IDX_NONE;
+  code = parse_optional_data(raw_cert, DER_IMPLICIT_1, &idx, akid_seq_end, &aci_end);
+  if (code != OK) {
+    return code;
+  }
+
+  if (aci_end != IDX_NONE) {
+    // TODO: Parse general names.
+    idx = aci_end;
+  }
+
+  /*authorityCertSerialNumber [2] CertificateSerialNumber OPTIONAL*/
+  uinta acsn_end = IDX_NONE;
+  code = parse_optional_data(raw_cert, DER_IMPLICIT_2, &idx, akid_seq_end, &acsn_end);
+  if (code != OK) {
+    return code;
+  }
+
+  if (acsn_end != IDX_NONE) {
+    // TODO: Use serial number.
+    idx = acsn_end;
+  }
+
+  if (idx != extn_end) {
+    return TRAILING_DATA;
+  }
+
+  return OK;
+}
+
+/*SubjectKeyIdentifier ::= KeyIdentifier*/
+StatusCode parse_skid(byte *raw_cert, uinta idx, uinta extn_end, x509Fields *ret_fields) {
+  StatusCode code = parse_data_element(raw_cert, DER_OCTET_STRING, &idx, extn_end, &ret_fields->skid_end);
+  if (code != OK) {
+    return code;
+  }
+  if (ret_fields->skid_end != extn_end) {
+    return TRAILING_DATA;
+  }
+
+  ret_fields->skid_start = idx;
+  return OK;
+}
+
+
+#define TABULATE(...) {__VA_ARGS__}
+#define DECL_EXTN(name, c, oid)                                                                    \
+  static const byte MACRO_CAT(name, _oid)[] = oid;                                                 \
+  static const SupportedExtn name = {MACRO_CAT(name, _oid), sizeof(MACRO_CAT(name, _oid)), c,      \
+                                     MACRO_CAT(parse_, name)};
+
+DECL_EXTN(basic_constraint, 0b11, TABULATE(0x55, 0x1d, 0x13));
+DECL_EXTN(akid, 0b10, TABULATE(0x55, 0x1d, 0x23));
+DECL_EXTN(skid, 0b10, TABULATE(0x55, 0x1d, 0x0e));
+
+const SupportedExtn supported_etxns[] = {basic_constraint, akid, skid};
+const uinta supported_etxns_size = sizeof(supported_etxns) / sizeof(supported_etxns[0]);
+
 
 /*Time ::= CHOICE {
       utcTime        UTCTime,
@@ -279,7 +450,7 @@ StatusCode parse_name(byte *raw_cert, uinta *idx, uinta parent_end) {
   return OK;
 }
 
-StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields* ret_x509) {
+StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields* ret_fields) {
   uinta idx_mem = 0;
   uinta *idx = &idx_mem;
 
@@ -312,7 +483,7 @@ StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields* ret_x509)
         extensions      [3]  EXPLICIT Extensions OPTIONAL
                              -- If present, version MUST be v3
         }*/
-  ret_x509->signed_data_start = *idx;
+  ret_fields->signed_data_start = *idx;
 
   uinta tbs_cert_end = 0;
   code = parse_data_element(raw_cert, DER_SEQUENCE, idx, cert_end, &tbs_cert_end);
@@ -320,16 +491,25 @@ StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields* ret_x509)
     return code;
   }
 
-  ret_x509->signed_data_end = tbs_cert_end;
+  ret_fields->signed_data_end = tbs_cert_end;
 
   /*version         [0]  EXPLICIT Version DEFAULT v1*/
+  uinta explicit_end = 0;
+  code = parse_data_element(raw_cert, DER_EXPLICIT_0, idx, tbs_cert_end, &explicit_end);
+  if (code != OK) {
+    return code;
+  }
+
   uinta version_end = 0;
-  code = parse_data_element(raw_cert, DER_INTEGER, idx, tbs_cert_end, &version_end);
+  code = parse_data_element(raw_cert, DER_INTEGER, idx, explicit_end, &version_end);
   if (code != OK) {
     return code;
   }
   if (version_end - *idx != 1 || raw_cert[*idx] != X509_ACCEPTED_VERSION) {
     return INVALID_VERSION;
+  }
+  if (version_end != explicit_end) {
+    return TRAILING_DATA;
   }
 
   *idx = version_end;
@@ -345,8 +525,8 @@ StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields* ret_x509)
   *idx = serial_end;
 
   /*signature            AlgorithmIdentifier*/
-  code = parse_alg_id(raw_cert, idx, tbs_cert_end, &ret_x509->sig_id_start, &ret_x509->sig_id_end,
-                      &ret_x509->sig_oid_start, &ret_x509->sig_oid_end);
+  code = parse_alg_id(raw_cert, idx, tbs_cert_end, &ret_fields->sig_id_start, &ret_fields->sig_id_end,
+                      &ret_fields->sig_oid_start, &ret_fields->sig_oid_end);
   if (code != OK) {
     return code;
   }
@@ -368,19 +548,17 @@ StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields* ret_x509)
   }
 
   /*notBefore      Time*/
-  time_t not_before_ts = 0;
-  code = parse_time(raw_cert, idx, validity_end, &not_before_ts);
+  code = parse_time(raw_cert, idx, validity_end, &ret_fields->not_before);
   if (code != OK) {
     return code;
   }
 
   /*notAfter       Time*/
-  time_t not_after_ts = 0;
-  code = parse_time(raw_cert, idx, validity_end, &not_after_ts);
+  code = parse_time(raw_cert, idx, validity_end, &ret_fields->not_after);
   if (code != OK) {
     return code;
   }
-  if (validity_end != *idx) {
+  if (*idx != validity_end) {
     return TRAILING_DATA;
   }
 
@@ -401,27 +579,27 @@ StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields* ret_x509)
   }
 
   /*algorithm            AlgorithmIdentifier*/
-  code = parse_alg_id(raw_cert, idx, public_key_info_end, &ret_x509->pub_key_id_start,
-                      &ret_x509->pub_key_id_end, &ret_x509->pub_key_oid_start, &ret_x509->pub_key_oid_end);
+  code = parse_alg_id(raw_cert, idx, public_key_info_end, &ret_fields->pub_key_id_start,
+                      &ret_fields->pub_key_id_end, &ret_fields->pub_key_oid_start, &ret_fields->pub_key_oid_end);
   if (code != OK) {
     return code;
   }
 
   /*subjectPublicKey     BIT STRING*/
-  code = parse_data_element(raw_cert, DER_BITSTRING, idx, public_key_info_end, &ret_x509->pub_key_end);
+  code = parse_data_element(raw_cert, DER_BITSTRING, idx, public_key_info_end, &ret_fields->pub_key_end);
   if (code != OK) {
     return code;
   }
-  if (*idx != public_key_info_end) {
+  if (ret_fields->pub_key_end != public_key_info_end) {
     return TRAILING_DATA;
   }
 
-  ret_x509->pub_key_start = *idx;
-  *idx = ret_x509->pub_key_end;
+  ret_fields->pub_key_start = *idx;
+  *idx = ret_fields->pub_key_end;
 
   /*issuerUniqueID  [1]  IMPLICIT UniqueIdentifier OPTIONAL*/
   uinta issuer_uid_end = IDX_NONE;
-  code = parse_optional_data(raw_cert, DER_BITSTRING, idx, tbs_cert_end, &issuer_uid_end);
+  code = parse_optional_data(raw_cert, DER_IMPLICIT_1, idx, tbs_cert_end, &issuer_uid_end);
   if (code != OK) {
     return code;
   }
@@ -433,7 +611,7 @@ StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields* ret_x509)
 
   /*subjectUniqueID [2]  IMPLICIT UniqueIdentifier OPTIONAL*/
   uinta subject_uid_end = IDX_NONE;
-  code = parse_optional_data(raw_cert, DER_BITSTRING, idx, tbs_cert_end, &subject_uid_end);
+  code = parse_optional_data(raw_cert, DER_IMPLICIT_2, idx, tbs_cert_end, &subject_uid_end);
   if (code != OK) {
     return code;
   }
@@ -444,13 +622,31 @@ StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields* ret_x509)
   }
 
   /*extensions      [3]  EXPLICIT Extensions OPTIONAL*/
-  /*Extensions  ::=  SEQUENCE SIZE (1..MAX) OF Extension*/
-  uinta extensions_end = IDX_NONE;
-  code = parse_optional_data(raw_cert, DER_SEQUENCE, idx, tbs_cert_end, &extensions_end);
+  uinta explicit_3_end = IDX_NONE;
+  code = parse_optional_data(raw_cert, DER_EXPLICIT_3, idx, tbs_cert_end, &explicit_3_end);
   if (code != OK) {
     return code;
   }
-  if (extensions_end != IDX_NONE) {
+
+  // Assign default values to be overwritten.
+  ret_fields->skid_start = IDX_NONE;
+  ret_fields->skid_end = IDX_NONE;
+  ret_fields->akid_start = IDX_NONE;
+  ret_fields->akid_end = IDX_NONE;
+  ret_fields->key_cert_sign = false;
+  // ret_fields->path_len_constraint = 0;
+
+  if (explicit_3_end != IDX_NONE) {
+    /*Extensions  ::=  SEQUENCE SIZE (1..MAX) OF Extension*/
+    uinta extensions_end = 0;
+    code = parse_data_element(raw_cert, DER_SEQUENCE, idx, explicit_3_end, &extensions_end);
+    if (code != OK) {
+      return code;
+    }
+    if (extensions_end != explicit_3_end) {
+      return TRAILING_DATA;
+    }
+
     byte *extn_oids[MAX_EXTN] = {0};
     uinta extn_oid_sizes[MAX_EXTN] = {0};
     uinta extn_oid_list_size = 0;
@@ -484,24 +680,10 @@ StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields* ret_x509)
       *idx = extn_oid_end;
 
       /*critical    BOOLEAN DEFAULT FALSE*/
-      uinta critical_end = IDX_NONE;
-      code = parse_optional_data(raw_cert, DER_BOOLEAN, idx, extension_end, &critical_end);
+      bool critical = false;
+      code = parse_default_bool(raw_cert, idx, extension_end, &critical);
       if (code != OK) {
         return code;
-      }
-
-      bool critical = false;
-      if (critical_end != IDX_NONE) {
-        if (critical_end > *idx + 1 || raw_cert[*idx] > 1) {
-          return INVALID_BOOLEAN;
-        }
-        if (raw_cert[*idx] == 0) {
-          // The default value is false so we should not see a false boolean.
-          return EXPLICIT_DEFAULT;
-        }
-
-        critical = true;
-        *idx = critical_end;
       }
 
       /*extnValue   OCTET STRING*/
@@ -515,7 +697,7 @@ StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields* ret_x509)
       }
 
       byte *extn_oid = &raw_cert[extn_oid_start];
-      uinta extn_oid_size = extn_oid_start - extn_oid_start;
+      uinta extn_oid_size = extn_oid_end - extn_oid_start;
 
       // TODO: Refactor this code to be more extensible.
       // Check if we have already seen this extn oid.
@@ -530,88 +712,28 @@ StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields* ret_x509)
       extn_oid_sizes[extn_oid_list_size] = extn_oid_size;
       extn_oid_list_size += 1;
 
-      // See if we recognize this extension.
-      switch (extn_oid_size) {
-      case 5:
-        if (memcmp(extn_oid, extn_basic_constraint_oid, 5) == 0) {
-          /*basicConstraint  ::=  SEQUENCE  {
-            cA               BOOLEAN DEFAULT FALSE,
-            pathLenContraint INTEGER DEFAULT INFINITY,
-          }*/
-          uinta constraint_end = 0;
-          code = parse_data_element(raw_cert, DER_SEQUENCE, idx, extn_end, &constraint_end);
+      bool critical_fail = critical;
+      for_each_in(const SupportedExtn, s_extn, supported_etxns, supported_etxns_size) {
+        if (extn_oid_size == s_extn->oid_size && memcmp(extn_oid, s_extn->oid, extn_oid_size) == 0) {
+          if ((s_extn->criticality & 0b10) > 0 && (s_extn->criticality & 0b01) != cast(int, critical)) {
+            return INVALID_CRITICALITY;
+          }
+
+          code = s_extn->parse_extn(raw_cert, *idx, extn_end, ret_fields);
           if (code != OK) {
             return code;
           }
 
-          // TODO: Compress code.
-          uinta ca_end = IDX_NONE;
-          code = parse_optional_data(raw_cert, DER_BOOLEAN, idx, constraint_end, &ca_end);
-          if (code != OK) {
-            return code;
-          }
-
-          ret_x509->key_cert_sign = false;
-          if (ca_end != IDX_NONE) {
-            if (ca_end > *idx + 1 || raw_cert[*idx] > 1) {
-              return INVALID_BOOLEAN;
-            }
-            if (raw_cert[*idx] == 0) {
-              // The default value is false so we should not see a false boolean.
-              return EXPLICIT_DEFAULT;
-            }
-
-            ret_x509->key_cert_sign = true;
-            *idx = ca_end;
-
-            uinta path_end = IDX_NONE;
-            code = parse_optional_data(raw_cert, DER_INTEGER, idx, constraint_end, &path_end);
-            if (code != OK) {
-              return code;
-            }
-
-            if (path_end != IDX_NONE) {
-              *idx = path_end;
-              // TODO: Handle path_len_constraint
-            }
-          }
-        } else if (memcmp(extn_oid, extn_akid_oid, 5) == 0) {
-          code = parse_data_element(raw_cert, DER_OCTET_STRING, idx, extn_end, &ret_x509->akid_end);
-          if (code != OK) {
-            return code;
-          }
-
-          ret_x509->akid_start = *idx;
-          *idx = ret_x509->akid_end;
-        } else if (memcmp(extn_oid, extn_skid_oid, 5) == 0) {
-          code = parse_data_element(raw_cert, DER_OCTET_STRING, idx, extn_end, &ret_x509->skid_end);
-          if (code != OK) {
-            return code;
-          }
-
-          ret_x509->skid_start = *idx;
-          *idx = ret_x509->skid_end;
-        } else if (critical) {
-          return UNRECOGNIZED_CRITICAL_EXTN;
-        }
-        break;
-      default:
-        if (critical) {
-          return UNRECOGNIZED_CRITICAL_EXTN;
+          critical_fail = false;
+          break;
         }
       }
-      if (*idx != extn_end) {
-        return TRAILING_DATA;
+      if (critical_fail) {
+        return UNRECOGNIZED_CRITICAL_EXTN;
       }
+      *idx = extn_end;
     }
     assert(*idx == extensions_end);
-  } else {
-    ret_x509->skid_start = IDX_NONE;
-    ret_x509->skid_end = IDX_NONE;
-    ret_x509->akid_start = IDX_NONE;
-    ret_x509->akid_end = IDX_NONE;
-    ret_x509->key_cert_sign = false;
-    // ret_x509->path_len_constraint = 0;
   }
 
   // End of TBS certificate parsing.
@@ -621,26 +743,26 @@ StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields* ret_x509)
 
   /*signatureAlgorithm   AlgorithmIdentifier*/
   // signatureAlgorithm must be identical to signature in the TBS cert, so we can simplify parsing.
-  uinta sig_id_size = ret_x509->sig_id_end - ret_x509->sig_id_start;
+  uinta sig_id_size = ret_fields->sig_id_end - ret_fields->sig_id_start;
   if (*idx + sig_id_size >= cert_end) {
     return UNEXPECTED_END_OF_DATA;
   }
-  if (memcmp(&raw_cert[ret_x509->sig_id_start], &raw_cert[*idx], sig_id_size) != 0) {
+  if (memcmp(&raw_cert[ret_fields->sig_id_start], &raw_cert[*idx], sig_id_size) != 0) {
     return MISMATCHED_SIG_ID;
   }
   *idx += sig_id_size;
 
   /*signatureValue       BIT STRING*/
-  code = parse_data_element(raw_cert, DER_BITSTRING, idx, cert_end, &ret_x509->sig_end);
+  code = parse_data_element(raw_cert, DER_BITSTRING, idx, cert_end, &ret_fields->sig_end);
   if (code != OK) {
     return code;
   }
-  if (ret_x509->sig_end != cert_end) {
+  if (ret_fields->sig_end != cert_end) {
     return TRAILING_DATA;
   }
 
-  ret_x509->sig_start = *idx;
-  *idx = ret_x509->sig_end;
+  ret_fields->sig_start = *idx;
+  *idx = ret_fields->sig_end;
 
   return OK;
 }

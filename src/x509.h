@@ -3,7 +3,7 @@
 
 #include "basic.h"
 
-const uinta IDX_NONE = 0;
+#define IDX_NONE 0
 
 typedef struct {
   // Must be present.
@@ -55,22 +55,18 @@ typedef enum {
   OK,
   UNEXPECTED_END_OF_DATA,
   UNEXPECTED_IDENTIFIER,
-  INVALID_END_OF_DATA,
   INVALID_LENGTH_FORM,
-  INVALID_LENGTH_TOO_LONG,
   TRAILING_DATA,
   INVALID_VERSION,
   INVALID_BOOLEAN,
   INVALID_VALIDITY_TIME,
   MISMATCHED_SIG_ID,
-  UNKNOWN_SIG_ID,
-  INVALID_SIG_PARAMS,
   EXCEEDS_MAX_EXTNS,
   DUPLICATE_EXTNS,
   UNRECOGNIZED_CRITICAL_EXTN,
-  EXPLICIT_DEFAULT,
+  INVALID_CRITICALITY,
 } StatusCode;
 
-StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields *ret_x509);
+StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields *ret_fields);
 
 #endif

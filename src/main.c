@@ -21,13 +21,13 @@ const uint16 TCP_PORT = 59261;
 void exec_script(byte *script, uinta script_size) {
   int in_pipe[2] = {0};
   if (pipe(in_pipe) < 0) {
-    printf("TODO");
+    printf("TODO\n");
     return;
   }
 
   pid_t pid = fork();
   if (pid < 0) {
-    printf("TODO");
+    printf("TODO\n");
     return;
   }
 
@@ -39,10 +39,11 @@ void exec_script(byte *script, uinta script_size) {
     close(in_pipe[0]);
     close(in_pipe[1]);
 
-    exit(execvp("/bin/bash", NULL));
+    const char* bash = "bash";
+    exit(execlp(bash, bash, NULL));
   }
 
-  printf("TODO Success");
+  printf("TODO Success\n");
   write(in_pipe[1], script, script_size);
 
   close(in_pipe[0]);
@@ -52,7 +53,7 @@ void exec_script(byte *script, uinta script_size) {
 }
 
 int main(int argc, char *argv[]) {
-  if (argc <= 2) {
+  if (argc < 2) {
     printf("%s: Missing file operand\n", argv[0]);
     return -1;
   }
@@ -92,52 +93,40 @@ int main(int argc, char *argv[]) {
     }
     break;
   case UNEXPECTED_END_OF_DATA:
-    printf("TODO");
+    printf("Encountered unexpected end of certificate sequence\n");
     break;
   case UNEXPECTED_IDENTIFIER:
-    printf("TODO");
-    break;
-  case INVALID_END_OF_DATA:
-    printf("TODO");
+    printf("Encountered unexpected identifier in certificate\n");
     break;
   case INVALID_LENGTH_FORM:
-    printf("TODO");
-    break;
-  case INVALID_LENGTH_TOO_LONG:
-    printf("TODO");
+    printf("Encountered invalid encoding length in certificate\n");
     break;
   case TRAILING_DATA:
-    printf("TODO");
+    printf("Certificate encoding had invalid trailing data\n");
     break;
   case INVALID_VERSION:
-    printf("TODO");
+    printf("Only v3 x509 certificates are accepted\n");
     break;
   case INVALID_BOOLEAN:
-    printf("TODO");
+    printf("Encountered invalid boolean value in certificate\n");
     break;
   case INVALID_VALIDITY_TIME:
-    printf("TODO");
+    printf("Encountered invalid certificate validity timestamp\n");
     break;
   case MISMATCHED_SIG_ID:
-    printf("TODO");
-    break;
-  case UNKNOWN_SIG_ID:
-    printf("TODO");
-    break;
-  case INVALID_SIG_PARAMS:
-    printf("TODO");
+    printf("Certificate signature identifiers did not match\n");
     break;
   case EXCEEDS_MAX_EXTNS:
-    printf("TODO");
+    printf("Certificate contained too many extensions\n");
     break;
   case DUPLICATE_EXTNS:
-    printf("TODO");
+    printf("Certificate contained a duplicate extension\n");
     break;
   case UNRECOGNIZED_CRITICAL_EXTN:
-    printf("TODO");
+    printf("Certificate contained an unrecognized critical extension\n");
     break;
-  case EXPLICIT_DEFAULT:
-    printf("TODO");
+  case INVALID_CRITICALITY:
+    printf("Certificate extension had incorrect criticality\n");
     break;
   }
 
@@ -147,7 +136,7 @@ int main(int argc, char *argv[]) {
   if (is_pub_key_populated) {
     int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (sock_fd < 0) {
-      printf("TODO");
+      printf("TODO\n");
       return -1;
     }
 
@@ -158,12 +147,12 @@ int main(int argc, char *argv[]) {
 
     if (bind(sock_fd, cast(struct sockaddr *, &server_addr), sizeof(server_addr)) < 0) {
       close(sock_fd);
-      printf("TODO");
+      printf("TODO\n");
       return -1;
     }
     if (listen(sock_fd, TCP_BACKLOG) < 0) {
       close(sock_fd);
-      printf("TODO");
+      printf("TODO\n");
       return -1;
     }
 
@@ -179,7 +168,7 @@ int main(int argc, char *argv[]) {
         if (errno == EINTR) {
           continue;
         }
-        printf("TODO");
+        printf("TODO\n");
         break;
       }
 
@@ -189,7 +178,7 @@ int main(int argc, char *argv[]) {
         if (ret < 0) {
           close(sock_fd);
           close(conn_fd);
-          printf("TODO");
+          printf("TODO\n");
           return -1;
         } else if (ret == 0) {
           // Null terminate the buffer for later.
@@ -225,12 +214,12 @@ int main(int argc, char *argv[]) {
           // The signature is valid, so execute the script.
           exec_script(script, script_size);
         } else {
-          printf("TODO");
+          printf("TODO\n");
         }
       } else if (script_start == script_end) {
-        printf("TODO");
+        printf("TODO\n");
       } else {
-        printf("TODO");
+        printf("TODO\n");
       }
     }
 

@@ -48,7 +48,6 @@ bool ed25519_verify(PubKey *pub_key, const byte *data, uinta data_size, const by
 }
 
 #define TABULATE(...) {__VA_ARGS__}
-
 #define DECL_ALG(name, size, oid)                                                                  \
   static const byte MACRO_CAT(name, _oid)[] = oid;                                                 \
   static const SupportedAlg name = {MACRO_CAT(name, _oid), sizeof(MACRO_CAT(name, _oid)), size,    \
