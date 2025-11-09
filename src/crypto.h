@@ -10,7 +10,7 @@ typedef struct PubKey {
   union {
     struct {
       void *pkey;
-    } ed25519;
+    } openssl_ed;
     struct {
 
     } rsa;

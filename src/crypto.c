@@ -13,21 +13,32 @@ typedef struct {
                      uinta);
 } SupportedAlg;
 
-bool ed25519_extract(byte *raw_cert, const x509Fields *fields, PubKey *ret_pub_key) {
+bool openssl_extract(byte *raw_cert, const x509Fields *fields, int key_type, PubKey *ret_pub_key) {
   // There must not be a params field.
   if (fields->pub_key_oid_end != fields->pub_key_id_end) {
     return false;
   }
 
-  EVP_PKEY *pkey = EVP_PKEY_new_raw_public_key(EVP_PKEY_ED25519, NULL,
-                                            &raw_cert[fields->pub_key_start],
-                                            fields->pub_key_end - fields->pub_key_start);
+  EVP_PKEY *pkey = EVP_PKEY_new_raw_public_key(key_type, NULL, &raw_cert[fields->pub_key_start],
+                                               fields->pub_key_end - fields->pub_key_start);
   if (pkey == NULL) {
     return false;
   }
 
-  ret_pub_key->ed25519.pkey = pkey;
+  ret_pub_key->openssl_ed.pkey = pkey;
   return true;
+}
+
+bool ed25519_extract(byte *raw_cert, const x509Fields *fields, PubKey *ret_pub_key) {
+  return openssl_extract(raw_cert, fields, EVP_PKEY_ED25519, ret_pub_key);
+}
+
+bool ed448_extract(byte *raw_cert, const x509Fields *fields, PubKey *ret_pub_key) {
+  return openssl_extract(raw_cert, fields, EVP_PKEY_ED448, ret_pub_key);
+}
+
+bool p384_extract(byte *raw_cert, const x509Fields *fields, PubKey *ret_pub_key) {
+  return openssl_extract(raw_cert, fields, EVP_PKEY_EC, ret_pub_key);
 }
 
 bool ed25519_verify(PubKey *pub_key, const byte *data, uinta data_size, const byte *sig, uinta sig_size) {
@@ -37,7 +48,7 @@ bool ed25519_verify(PubKey *pub_key, const byte *data, uinta data_size, const by
     return false;
   }
 
-  if (EVP_DigestVerifyInit(ctx, NULL, NULL, NULL, pub_key->ed25519.pkey) == 0) {
+  if (EVP_DigestVerifyInit(ctx, NULL, NULL, NULL, pub_key->openssl_ed.pkey) == 0) {
     EVP_MD_CTX_free(ctx);
     return false;
   }
@@ -47,6 +58,10 @@ bool ed25519_verify(PubKey *pub_key, const byte *data, uinta data_size, const by
   return ret;
 }
 
+#define ed448_verify ed25519_verify
+
+
+
 #define TABULATE(...) {__VA_ARGS__}
 #define DECL_ALG(name, size, oid)                                                                  \
   static const byte MACRO_CAT(name, _oid)[] = oid;                                                 \
@@ -54,8 +69,9 @@ bool ed25519_verify(PubKey *pub_key, const byte *data, uinta data_size, const by
                                     MACRO_CAT(name, _extract), MACRO_CAT(name, _verify)};
 
 DECL_ALG(ed25519, 64, TABULATE(0x2b, 0x65, 0x70));
+DECL_ALG(ed448, 128, TABULATE(0x2b, 0x65, 0x71));
 
-const SupportedAlg supported_algs[] = {ed25519};
+const SupportedAlg supported_algs[] = {ed25519, ed448};
 const uinta supported_algs_size = sizeof(supported_algs) / sizeof(supported_algs[0]);
 
 
@@ -64,10 +80,13 @@ bool pub_key_extract(byte *raw_cert, const x509Fields *fields, PubKey *ret_pub_k
   for_each_idx(const SupportedAlg, idx, alg, supported_algs, supported_algs_size) {
     if (alg->oid_size == pub_key_size &&
         memcmp(alg->oid, &raw_cert[fields->pub_key_oid_start], pub_key_size) == 0) {
+
       ret_pub_key->alg_idx = idx;
+      ret_pub_key->exp_sig_size = alg->exp_sig_size;
       return alg->extract_key(raw_cert, fields, ret_pub_key);
     }
   }
+
   return false;
 }
 

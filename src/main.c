@@ -13,10 +13,9 @@
 #include "x509.h"
 #include "crypto.h"
 #include "basic.h"
-#include <wchar.h>
 
 const int TCP_BACKLOG = 16;
-const uint16 TCP_PORT = 59261;
+const uint16 DEFAULT_PORT = 56543;
 
 void exec_script(byte *script, uinta script_size) {
   int in_pipe[2] = {0};
@@ -144,13 +143,13 @@ int main(int argc, char *argv[]) {
   }
 
   struct sockaddr_in server_addr = {0};
-  server_addr.sin_addr.s_addr = INADDR_ANY;
   server_addr.sin_family = AF_INET;
-  server_addr.sin_port = TCP_PORT;
+  server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+  server_addr.sin_port = htons(DEFAULT_PORT);
 
   if (bind(sock_fd, cast(struct sockaddr *, &server_addr), sizeof(server_addr)) < 0) {
     close(sock_fd);
-    printf("Failed to bind a TCP socket to port %d\n", TCP_PORT);
+    printf("Failed to bind a TCP socket to port %d\n", DEFAULT_PORT);
     return -1;
   }
   if (listen(sock_fd, TCP_BACKLOG) < 0) {
@@ -163,7 +162,7 @@ int main(int argc, char *argv[]) {
   uinta buf_cap = KILOBYTE;
 
   while (true) {
-    struct sockaddr_in clien_addr;
+    struct sockaddr_in clien_addr = {0};
     socklen_t clien_addr_size = sizeof(clien_addr);
     int conn_fd =
         accept(sock_fd, cast(struct sockaddr *, &clien_addr), &clien_addr_size);
@@ -171,33 +170,34 @@ int main(int argc, char *argv[]) {
       if (errno == EINTR) {
         continue;
       }
-      printf("Failed to accept a TCP connection\n");
+      printf("Failed to accept a TCP connection, retrying...\n");
       break;
     }
 
     uinta buf_size = 0;
     while (true) {
-      inta ret = recv(conn_fd, &buf[buf_size], buf_cap - buf_size, MSG_TRUNC);
+      assert(buf_cap > buf_size);
+      inta ret = recv(conn_fd, &buf[buf_size], buf_cap - buf_size, 0);
       if (ret < 0) {
         close(sock_fd);
         close(conn_fd);
         printf("Failed to receive data from a TCP connection\n");
         return -1;
-      } else if (ret == 0) {
-        // Null terminate the buffer for safety. It should go unused.
-        assert(buf_size < buf_cap);
-        buf[buf_size] = 0;
-        buf_size += 1;
-        break;
-      } else {
+      } else if (ret > 0) {
         buf_size += ret;
-        if (buf_size == buf_cap) {
+        if (buf_size >= buf_cap) {
           // NOTE: In a production environment this growth should be capped and OOM checked.
           buf_cap *= 2;
           buf = realloc(buf, buf_cap);
         }
+      } else {
+        // Null terminate the buffer for safety. It is not within buf_size and should go unused.
+        assert(buf_size < buf_cap);
+        buf[buf_size] = 0;
+        break;
       }
     }
+    close(conn_fd);
 
     /*A bash script whose 1st line is the signature of the rest of the bash file.*/
     // A raw public key signature may and often will incidentally contain a newline character. So
@@ -208,17 +208,16 @@ int main(int argc, char *argv[]) {
     // as unambiguously part of the signature.
     uinta sig_end = pub_key.exp_sig_size;
     uinta script_start = pub_key.exp_sig_size + 1;
-    uinta script_end = buf_size - 1;
-    if (script_start < script_end && buf[sig_end] == '\n') {
+    if (script_start < buf_size && buf[sig_end] == '\n') {
       byte *script = &buf[script_start];
-      uinta script_size = script_end - script_start;
+      uinta script_size = buf_size - script_start;
       if (pub_key_verify(&pub_key, script, script_size, buf, sig_end)) {
         // The signature is valid, so execute the script.
         exec_script(script, script_size);
       } else {
         printf("Remote bash script had an invalid signature, aborting execution\n");
       }
-    } else if (script_start == script_end) {
+    } else if (script_start == buf_size) {
       printf("Remote bash script was empty, aborting execution\n");
     } else {
       printf("Remote bash script did not contain a signature, aborting execution\n");
