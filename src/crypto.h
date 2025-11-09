@@ -21,7 +21,8 @@ typedef struct PubKey {
 typedef enum {
   CERT_OK,
   EXPIRED,
-  INVALID_CONSTRAINTS,
+  INVALID_USAGE,
+  INVALID_SELF_SIGN,
   INVALID_SIG,
   INVALID_PUB_KEY,
   INVALID_PUB_KEY_PARAMS,
@@ -31,7 +32,7 @@ typedef enum {
 // We assume that the signature algorithm used to sign the certificate is the same as the one which
 // will be used to sign bash scripts.
 //
-ExtractCode extract_self_sign(byte *raw_cert, const x509Fields *fields, time_t now,
+ExtractCode extract_self_sign_for_code_sign(byte *raw_cert, const x509Fields *fields, time_t now,
                               PubKey *ret_pub_key);
 
 bool pub_key_verify(PubKey *pub_key, const byte *data, uinta data_size, const byte *sig,

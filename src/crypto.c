@@ -16,7 +16,7 @@ typedef struct {
   void (*free)(PubKey *);
 } SupportedAlg;
 
-bool certcmp(byte *raw_cert, uinta start0, uinta end0, uinta start1, uinta end1) {
+bool certeq(byte *raw_cert, uinta start0, uinta end0, uinta start1, uinta end1) {
   return memeq(&raw_cert[start0], end0 - start0, &raw_cert[start1], end1 - start1);
 }
 
@@ -28,7 +28,7 @@ ExtractCode ed_extract(byte *raw_cert, const x509Fields *fields, int key_type,
   }
 
   // The signature and public key ids must match with ed25519 and ed448.
-  if (!certcmp(raw_cert, fields->sig_id_start, fields->sig_id_end, fields->pub_key_id_start,
+  if (!certeq(raw_cert, fields->sig_id_start, fields->sig_id_end, fields->pub_key_id_start,
                fields->pub_key_id_end)) {
     return INVALID_SIG;
   }
@@ -50,7 +50,7 @@ ExtractCode ed25519_extract(byte *raw_cert, const x509Fields *fields, PubKey *re
   return ed_extract(raw_cert, fields, EVP_PKEY_ED25519, ret_pub_key);
 }
 ExtractCode ed448_extract(byte *raw_cert, const x509Fields *fields, PubKey *ret_pub_key) {
-  ret_pub_key->exp_sig_size = 128;
+  ret_pub_key->exp_sig_size = 114;
   return ed_extract(raw_cert, fields, EVP_PKEY_ED448, ret_pub_key);
 }
 
@@ -254,26 +254,33 @@ ExtractCode pub_key_extract(byte *raw_cert, const x509Fields *fields, PubKey *re
   return UNSUPPORTED_ALG;
 }
 
-ExtractCode extract_self_sign(byte *raw_cert, const x509Fields *fields, time_t now,
+ExtractCode extract_self_sign_for_code_sign(byte *raw_cert, const x509Fields *fields, time_t now,
                               PubKey *ret_pub_key) {
   if (fields->not_before > now || fields->not_after < now) {
     return EXPIRED;
   }
   if (!fields->key_cert_sign) {
-    return INVALID_CONSTRAINTS;
+    return INVALID_USAGE;
   }
 
+  // We allow skid and akid to be empty since they are irrelevant for self-signed certificates.
   bool is_skid = fields->skid_start != IDX_NONE;
   bool is_akid = fields->akid_start != IDX_NONE;
   if (is_skid != is_akid) {
-    return INVALID_CONSTRAINTS;
+    return INVALID_SELF_SIGN;
   }
   if (is_skid && is_akid &&
-      !certcmp(raw_cert, fields->skid_start, fields->skid_end, fields->akid_start,
+      !certeq(raw_cert, fields->skid_start, fields->skid_end, fields->akid_start,
                fields->akid_end)) {
-    return INVALID_CONSTRAINTS;
+    return INVALID_SELF_SIGN;
   }
   // TODO: Consider comparing issuer and subject names.
+
+  // We are going to require both key usage and extended key usage extensions.
+  uint32 mask = KEY_USAGE_FLAG_SIGN | KEY_USAGE_FLAG_KEY_CERT_SIGN | KEY_USAGE_FLAG_CODE_SIGNING;
+  if (!fields->has_key_usage || !fields->has_ext_key_usage || (fields->key_usage_flags & mask) != mask) {
+    return INVALID_USAGE;
+  }
 
   ExtractCode code = pub_key_extract(raw_cert, fields, ret_pub_key);
   if (code != CERT_OK) {

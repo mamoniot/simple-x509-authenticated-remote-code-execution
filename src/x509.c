@@ -5,7 +5,6 @@
 
 #include "x509.h"
 
-
 typedef struct {
   const byte *oid;
   uinta oid_size;
@@ -160,7 +159,7 @@ StatusCode parse_bitstring_no_unused(byte *raw_cert, uinta *idx, uinta parent_en
     return UNEXPECTED_END_OF_DATA;
   }
   if (raw_cert[*idx] != 0) {
-    return TRAILING_DATA;
+    return INVALID_BITSTRING;
   }
 
   *idx += 1;
@@ -277,6 +276,115 @@ StatusCode parse_skid(byte *raw_cert, uinta idx, uinta extn_end, x509Fields *ret
   return OK;
 }
 
+/*KeyUsage ::= BIT STRING {
+           digitalSignature        (0),
+           nonRepudiation          (1), -- recent editions of X.509 have
+                                -- renamed this bit to contentCommitment
+           keyEncipherment         (2),
+           dataEncipherment        (3),
+           keyAgreement            (4),
+           keyCertSign             (5),
+           cRLSign                 (6),
+           encipherOnly            (7),
+           decipherOnly            (8) }*/
+// This function assumes that ret_fields->key_usage_flags is already set and will bitwise or the new
+// usages onto it.
+StatusCode parse_key_usage(byte *raw_cert, uinta idx, uinta extn_end, x509Fields *ret_fields) {
+  uinta usage_end = 0;
+  StatusCode code = parse_data_element(raw_cert, DER_BITSTRING, &idx, extn_end, &usage_end);
+  if (code != OK) {
+    return code;
+  }
+  // Bitstring must contain 2 or 3 bytes.
+  if (usage_end - idx <= 1) {
+    return UNEXPECTED_END_OF_DATA;
+  }
+  if (usage_end != extn_end || usage_end - idx > 3) {
+    return TRAILING_DATA;
+  }
+
+  // Validate the bitstring length.
+  /*When DER encoding a named bit list, trailing zeros MUST be omitted.  That is, the encoded value
+   * ends with the last named bit that is set to one.*/
+  if (raw_cert[idx] >= 8) {
+    return INVALID_BITSTRING;
+  }
+  uint8 last_set_bit = 0x80u >> (7 - raw_cert[idx]);
+  // This intentionally overflows.
+  uint8 unused_bits = last_set_bit - 1;
+  if ((raw_cert[usage_end - 1] & last_set_bit) == 0 ||
+      (raw_cert[usage_end - 1] & unused_bits) > 0) {
+    return INVALID_BITSTRING;
+  }
+
+  ret_fields->has_key_usage = true;
+  // This logic only works because we use the same exact bit flags as this extension specifies.
+  ret_fields->key_usage_flags |= cast(uint32, raw_cert[idx + 1]);
+  if (idx + 2 < usage_end) {
+    ret_fields->key_usage_flags |= cast(uint32, raw_cert[idx + 2]) << 1;
+  }
+  return OK;
+}
+
+/*ExtKeyUsageSyntax ::= SEQUENCE SIZE (1..MAX) OF KeyPurposeId*/
+StatusCode parse_ext_key_usage(byte *raw_cert, uinta idx, uinta extn_end, x509Fields *ret_fields) {
+  const byte KP_OID[] = {0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x00};
+
+  uinta usage_end = 0;
+  StatusCode code = parse_data_element(raw_cert, DER_SEQUENCE, &idx, extn_end, &usage_end);
+  if (code != OK) {
+    return code;
+  }
+  if (usage_end != extn_end) {
+    return TRAILING_DATA;
+  }
+
+  /*KeyPurposeId ::= OBJECT IDENTIFIER*/
+  while (idx < usage_end) {
+    uinta purpose_end = 0;
+    code = parse_data_element(raw_cert, DER_OID, &idx, usage_end, &purpose_end);
+    if (code != OK) {
+      return code;
+    }
+
+    // All official extended key usage oids start with the same prefix.
+    if (purpose_end - idx == sizeof(KP_OID) &&
+        memcmp(&raw_cert[idx], KP_OID, sizeof(KP_OID) - 1) == 0) {
+      switch (raw_cert[purpose_end - 1]) {
+      case 0x00:
+        ret_fields->key_usage_flags |= KEY_USAGE_FLAG_ANY_EXTENDED;
+        break;
+      case 0x01:
+        ret_fields->key_usage_flags |= KEY_USAGE_FLAG_SERVER_AUTH;
+        break;
+      case 0x02:
+        ret_fields->key_usage_flags |= KEY_USAGE_FLAG_CLIENT_AUTH;
+        break;
+      case 0x03:
+        ret_fields->key_usage_flags |= KEY_USAGE_FLAG_CODE_SIGNING;
+        break;
+      case 0x04:
+        ret_fields->key_usage_flags |= KEY_USAGE_FLAG_EMAIL_PROTECT;
+        break;
+      case 0x08:
+        ret_fields->key_usage_flags |= KEY_USAGE_FLAG_TIMESTAMP;
+        break;
+      case 0x09:
+        ret_fields->key_usage_flags |= KEY_USAGE_FLAG_OCSP_SIGN;
+        break;
+      default:
+        // Unknown extended key usage oid, ignore it.
+        break;
+      }
+    }
+
+    idx = purpose_end;
+  }
+  assert(idx == usage_end);
+
+  ret_fields->has_ext_key_usage = 1;
+  return OK;
+}
 
 #define TABULATE(...) {__VA_ARGS__}
 #define DECL_EXTN(name, c, oid)                                                                    \
@@ -287,8 +395,10 @@ StatusCode parse_skid(byte *raw_cert, uinta idx, uinta extn_end, x509Fields *ret
 DECL_EXTN(basic_constraint, 0b11, TABULATE(0x55, 0x1d, 0x13));
 DECL_EXTN(akid, 0b10, TABULATE(0x55, 0x1d, 0x23));
 DECL_EXTN(skid, 0b10, TABULATE(0x55, 0x1d, 0x0e));
+DECL_EXTN(key_usage, 0b00, TABULATE(0x55, 0x1d, 0x0f));
+DECL_EXTN(ext_key_usage, 0b00, TABULATE(0x55, 0x1d, 0x25));
 
-const SupportedExtn supported_etxns[] = {basic_constraint, akid, skid};
+const SupportedExtn supported_etxns[] = {basic_constraint, akid, skid, key_usage, ext_key_usage};
 const uinta supported_etxns_size = sizeof(supported_etxns) / sizeof(supported_etxns[0]);
 
 
@@ -649,6 +759,9 @@ StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields* ret_field
   ret_fields->akid_end = IDX_NONE;
   ret_fields->key_cert_sign = false;
   // ret_fields->path_len_constraint = 0;
+  ret_fields->has_key_usage = false;
+  ret_fields->has_ext_key_usage = false;
+  ret_fields->key_usage_flags = 0;
 
   if (explicit_3_end != IDX_NONE) {
     /*Extensions  ::=  SEQUENCE SIZE (1..MAX) OF Extension*/

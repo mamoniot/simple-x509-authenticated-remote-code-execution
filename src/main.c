@@ -15,7 +15,7 @@
 #include "basic.h"
 
 const int TCP_BACKLOG = 16;
-const uint16 DEFAULT_PORT = 56543;
+const uint16 DEFAULT_PORT = 56544;
 const uinta MAX_SCRIPT_SIZE = 2 * GIGABYTE;
 
 void exec_script(byte *script, uinta script_size) {
@@ -36,14 +36,15 @@ void exec_script(byte *script, uinta script_size) {
     // This is the child process.
     // Redirect stdin.
     dup2(in_pipe[0], STDIN_FILENO);
-    close(in_pipe[0]);
     close(in_pipe[1]);
 
+    printf("Remote bash script received and authenticated, executing now...\n");
     const char* BASH = "bash";
-    exit(execlp(BASH, BASH, NULL));
+    int ret = execlp(BASH, BASH, NULL);
+    fflush(stdout);
+    exit(ret);
   }
 
-  printf("Remote bash script received and authenticated, executing now...\n");
   write(in_pipe[1], script, script_size);
 
   close(in_pipe[0]);
@@ -86,32 +87,35 @@ int main(int argc, char *argv[]) {
   x509Fields fields = {0};
   switch (parse_x509(raw_cert, raw_cert_size, &fields)) {
   case OK:
-    switch (extract_self_sign(raw_cert, &fields, time(NULL), &pub_key)) {
+    switch (extract_self_sign_for_code_sign(raw_cert, &fields, time(NULL), &pub_key)) {
     case CERT_OK:
       is_pub_key_populated = true;
       break;
     case EXPIRED:
-      printf("The cerficate has expired\n");
+      printf("This cerficate has expired\n");
       break;
-    case INVALID_CONSTRAINTS:
-      printf("This cerficate cannot be self-signing\n");
+    case INVALID_SELF_SIGN:
+      printf("This cerficate is not self-signed\n");
+      break;
+    case INVALID_USAGE:
+      printf("This cerficate has restricted usage, it must explicitly allow code signing and certificate signing\n");
       break;
     case INVALID_PUB_KEY_PARAMS:
-      printf("The cerficate has invalid public key parameters\n");
+      printf("This cerficate has invalid public key parameters\n");
       break;
     case INVALID_PUB_KEY:
-      printf("The cerficate had an invalid public key\n");
+      printf("This cerficate had an invalid public key\n");
       break;
     case UNSUPPORTED_ALG:
-      printf("The cerficate uses an unsupported public key algorithm\n");
+      printf("This cerficate uses an unsupported public key algorithm\n");
       break;
     case INVALID_SIG:
-      printf("The cerficate's self-signature is inauthenticate\n");
+      printf("This cerficate's signature could not be authenticated\n");
       break;
     }
     break;
   case UNEXPECTED_END_OF_DATA:
-    printf("Encountered unexpected end of certificate sequence\n");
+    printf("Certificate sequence encoding ended unexpectedly\n");
     break;
   case UNEXPECTED_IDENTIFIER:
     printf("Encountered unexpected identifier in certificate\n");
@@ -145,6 +149,9 @@ int main(int argc, char *argv[]) {
     break;
   case INVALID_CRITICALITY:
     printf("Certificate extension had incorrect criticality\n");
+    break;
+  case INVALID_BITSTRING:
+    printf("Encountered invalid bitstring in certificate\n");
     break;
   }
 
@@ -238,7 +245,7 @@ int main(int argc, char *argv[]) {
         // The signature is valid, so execute the script.
         exec_script(script, script_size);
       } else {
-        printf("Remote bash script had an invalid signature, aborting execution\n");
+        printf("Remote bash script could not be authenticated, aborting execution\n");
       }
     } else {
       printf("Remote bash script did not contain a signature, aborting execution\n");

@@ -85,7 +85,7 @@ typedef int32  inta;
 #define swap(type, v0, v1) do {type* mam_t0 = (v0); type* mam_t1 = (v1); type mam_t = *mam_t0; *mam_t0 = *mam_t1; *mam_t1 = mam_t} while(0);
 #define malloct(type, size) ((type*)malloc(sizeof(type)*(size)))
 #define realloct(type, ptr, size) ((type*)realloc(ptr, sizeof(type)*(size)))
-inline bool memeq(const void *ptr0, uinta size0, const void *ptr1, uinta size1) { return (size0 == size1 && memcmp(ptr0, ptr1, size0)); }
+#define memeq(ptr0, size0, ptr1, size1) ((size0) == (size1) && memcmp(ptr0, ptr1, size1) == 0)
 
 #ifndef MAM_NO_FOR
 #define for_each_lt(name, size) inta UNIQUE_NAME(name) = (size); for(inta name = 0; name < UNIQUE_NAME(name); name += 1)
