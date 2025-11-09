@@ -1,5 +1,6 @@
 #include "assert.h"
 
+#include "basic.h"
 #include "openssl/evp.h"
 #include "openssl/param_build.h"
 #include "string.h"
@@ -16,8 +17,7 @@ typedef struct {
 } SupportedAlg;
 
 bool certcmp(byte *raw_cert, uinta start0, uinta end0, uinta start1, uinta end1) {
-  uinta size = end0 - start0;
-  return size == end1 - start1 && memcmp(&raw_cert[start0], &raw_cert[start1], size) == 0;
+  return memeq(&raw_cert[start0], end0 - start0, &raw_cert[start1], end1 - start1);
 }
 
 ExtractCode ed_extract(byte *raw_cert, const x509Fields *fields, int key_type,
@@ -72,14 +72,11 @@ ExtractCode rsa_extract(byte *raw_cert, const x509Fields *fields, PubKey *ret_pu
   byte *sig_oid = &raw_cert[fields->sig_oid_start];
   uinta sig_oid_size = fields->sig_oid_end - fields->sig_oid_start;
 
-  if (sig_oid_size == sizeof(RSA_SHA256_OID) &&
-      memcmp(sig_oid, RSA_SHA256_OID, sig_oid_size) == 0) {
+  if (memeq(sig_oid, sig_oid_size, RSA_SHA256_OID, sizeof(RSA_SHA256_OID))) {
     ret_pub_key->openssl.md = EVP_sha256();
-  } else if (sig_oid_size == sizeof(RSA_SHA384_OID) &&
-             memcmp(sig_oid, RSA_SHA384_OID, sig_oid_size) == 0) {
+  } else if (memeq(sig_oid, sig_oid_size, RSA_SHA384_OID, sizeof(RSA_SHA384_OID))) {
     ret_pub_key->openssl.md = EVP_sha384();
-  } else if (sig_oid_size == sizeof(RSA_SHA512_OID) &&
-             memcmp(sig_oid, RSA_SHA512_OID, sig_oid_size) == 0) {
+  } else if (memeq(sig_oid, sig_oid_size, RSA_SHA512_OID, sizeof(RSA_SHA512_OID))) {
     ret_pub_key->openssl.md = EVP_sha512();
   } else {
     return UNSUPPORTED_ALG;
@@ -245,10 +242,9 @@ const SupportedAlg supported_algs[] = {ed25519, ed448, rsa};
 const uinta supported_algs_size = sizeof(supported_algs) / sizeof(supported_algs[0]);
 
 ExtractCode pub_key_extract(byte *raw_cert, const x509Fields *fields, PubKey *ret_pub_key) {
-  byte *pub_key_oid = &raw_cert[fields->pub_key_oid_start];
-  uinta pub_key_oid_size = fields->pub_key_oid_end - fields->pub_key_oid_start;
   for_each_idx(const SupportedAlg, idx, alg, supported_algs, supported_algs_size) {
-    if (alg->oid_size == pub_key_oid_size && memcmp(alg->oid, pub_key_oid, pub_key_oid_size) == 0) {
+    if (memeq(alg->oid, alg->oid_size, &raw_cert[fields->pub_key_oid_start],
+              fields->pub_key_oid_end - fields->pub_key_oid_start)) {
 
       ret_pub_key->alg_idx = idx;
       return alg->extract_key(raw_cert, fields, ret_pub_key);

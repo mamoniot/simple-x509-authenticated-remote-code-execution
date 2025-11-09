@@ -718,7 +718,7 @@ StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields* ret_field
       // Assigning 128-bit hash-based uuids to each oid would be optimal but very complicated.
       // Linear lookup is fine unless MAX_EXTN is increased by an order of magnitude.
       for_each_lt(i, extn_oid_list_size) {
-        if (extn_oid_sizes[i] == extn_oid_size && memcmp(extn_oids[i], extn_oid, extn_oid_size) == 0) {
+        if (memeq(extn_oids[i], extn_oid_sizes[i], extn_oid, extn_oid_size)) {
           return DUPLICATE_EXTNS;
         }
       }
@@ -728,7 +728,7 @@ StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields* ret_field
 
       bool critical_fail = critical;
       for_each_in(const SupportedExtn, s_extn, supported_etxns, supported_etxns_size) {
-        if (extn_oid_size == s_extn->oid_size && memcmp(extn_oid, s_extn->oid, extn_oid_size) == 0) {
+        if (memeq(s_extn->oid, s_extn->oid_size, extn_oid, extn_oid_size)) {
           if ((s_extn->criticality & 0b10) > 0 && (s_extn->criticality & 0b01) != cast(int, critical)) {
             return INVALID_CRITICALITY;
           }

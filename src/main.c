@@ -16,6 +16,7 @@
 
 const int TCP_BACKLOG = 16;
 const uint16 DEFAULT_PORT = 56543;
+const uinta MAX_SCRIPT_SIZE = 2 * GIGABYTE;
 
 void exec_script(byte *script, uinta script_size) {
   int in_pipe[2] = {0};
@@ -185,16 +186,13 @@ int main(int argc, char *argv[]) {
     int conn_fd =
         accept(sock_fd, cast(struct sockaddr *, &clien_addr), &clien_addr_size);
     if (conn_fd < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
       printf("Failed to accept a TCP connection, retrying...\n");
-      break;
+      continue;
     }
 
     uinta buf_size = 0;
     while (true) {
-      assert(buf_cap > buf_size);
+      assert(buf_size < buf_cap);
       inta ret = recv(conn_fd, &buf[buf_size], buf_cap - buf_size, 0);
       if (ret < 0) {
         close(sock_fd);
@@ -203,19 +201,26 @@ int main(int argc, char *argv[]) {
         return -1;
       } else if (ret > 0) {
         buf_size += ret;
-        if (buf_size >= buf_cap) {
+        if (buf_size >= MAX_SCRIPT_SIZE) {
+          printf("TCP connection exceeded maximum allowed script size of %" PRIu64 "\n",
+                 MAX_SCRIPT_SIZE);
+          break;
+        } else if (buf_size >= buf_cap) {
           // NOTE: In a production environment this growth should be capped and OOM checked.
           buf_cap *= 2;
           buf = realloc(buf, buf_cap);
         }
       } else {
         // Null terminate the buffer for safety. It is not within buf_size and should go unused.
-        assert(buf_size < buf_cap);
         buf[buf_size] = 0;
         break;
       }
     }
     close(conn_fd);
+
+    if (buf_size >= MAX_SCRIPT_SIZE) {
+      continue;
+    }
 
     /*A bash script whose 1st line is the signature of the rest of the bash file.*/
     // A raw public key signature may and often will incidentally contain a newline character. So
