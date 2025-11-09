@@ -1,4 +1,4 @@
 .vscode
-*.key
 *.out
 *.exe
+temp.txt
