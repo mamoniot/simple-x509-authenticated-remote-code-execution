@@ -233,7 +233,7 @@ StatusCode parse_akid(byte *raw_cert, uinta idx, uinta extn_end, x509Fields *ret
 
   /*authorityCertIssuer       [1] GeneralNames            OPTIONAL*/
   uinta aci_end = IDX_NONE;
-  code = parse_optional_data(raw_cert, DER_IMPLICIT_1, &idx, akid_seq_end, &aci_end);
+  code = parse_optional_data(raw_cert, DER_IMPLICIT_1 | DER_CONSTRUCTED, &idx, akid_seq_end, &aci_end);
   if (code != OK) {
     return code;
   }
