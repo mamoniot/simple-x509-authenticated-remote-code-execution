@@ -1,0 +1,20 @@
+
+[code_signing]
+subjectKeyIdentifier=hash
+authorityKeyIdentifier=keyid:always
+basicConstraints = critical, CA:TRUE, pathlen:0
+keyUsage         = digitalSignature, keyCertSign
+extendedKeyUsage = codeSigning
+
+[code_signing_alt]
+subjectKeyIdentifier=hash
+authorityKeyIdentifier=keyid:always,issuer:always
+basicConstraints = critical, CA:TRUE
+keyUsage         = digitalSignature, keyCertSign, keyAgreement, decipherOnly
+extendedKeyUsage = codeSigning, emailProtection, OCSPSigning
+
+[wrong_code]
+subjectKeyIdentifier=hash
+authorityKeyIdentifier=keyid:always
+basicConstraints = critical, CA:TRUE, pathlen:0
+keyUsage         = digitalSignature, keyCertSign

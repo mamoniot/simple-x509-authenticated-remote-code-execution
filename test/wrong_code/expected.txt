@@ -1,0 +1,1 @@
+This cerficate has restricted usage, it must explicitly allow code signing and certificate signing
