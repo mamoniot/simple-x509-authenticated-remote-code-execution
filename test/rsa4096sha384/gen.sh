@@ -5,3 +5,4 @@ openssl req -x509 -newkey rsa:4096 -sha384 -outform DER -keyout $DIR/priv.key -o
 ./gen_sig.out $DIR/priv.key scripts/hello.sh sha384 > $DIR/hello
 ./gen_sig.out $DIR/priv.key scripts/ls.sh sha384 > $DIR/ls
 ./gen_sig.out $DIR/priv.key scripts/large.sh sha384 > $DIR/large
+./gen_sig.out $DIR/priv.key scripts/small.sh sha384 > $DIR/small

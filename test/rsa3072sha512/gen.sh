@@ -5,3 +5,4 @@ openssl req -x509 -newkey rsa:3072 -sha512 -outform DER -keyout $DIR/priv.key -o
 ./gen_sig.out $DIR/priv.key scripts/hello.sh sha512 > $DIR/hello
 ./gen_sig.out $DIR/priv.key scripts/ls.sh sha512 > $DIR/ls
 ./gen_sig.out $DIR/priv.key scripts/large.sh sha512 > $DIR/large
+./gen_sig.out $DIR/priv.key scripts/small.sh sha512 > $DIR/small

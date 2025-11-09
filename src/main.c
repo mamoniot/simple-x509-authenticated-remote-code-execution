@@ -42,7 +42,7 @@ void exec_script(byte *script, uinta script_size) {
     exit(execlp(BASH, BASH, NULL));
   }
 
-  printf("Remote bash script received and verified, executing now...\n");
+  printf("Remote bash script received and authenticated, executing now...\n");
   write(in_pipe[1], script, script_size);
 
   close(in_pipe[0]);
@@ -85,10 +85,28 @@ int main(int argc, char *argv[]) {
   x509Fields fields = {0};
   switch (parse_x509(raw_cert, raw_cert_size, &fields)) {
   case OK:
-    if (extract_self_sign(raw_cert, &fields, time(NULL), &pub_key)) {
+    switch (extract_self_sign(raw_cert, &fields, time(NULL), &pub_key)) {
+    case CERT_OK:
       is_pub_key_populated = true;
-    } else {
-      printf("The cerficate had an invalid signature\n");
+      break;
+    case EXPIRED:
+      printf("The cerficate has expired\n");
+      break;
+    case INVALID_CONSTRAINTS:
+      printf("This cerficate cannot be self-signing\n");
+      break;
+    case INVALID_PUB_KEY_PARAMS:
+      printf("The cerficate has invalid public key parameters\n");
+      break;
+    case INVALID_PUB_KEY:
+      printf("The cerficate had an invalid public key\n");
+      break;
+    case UNSUPPORTED_ALG:
+      printf("The cerficate uses an unsupported public key algorithm\n");
+      break;
+    case INVALID_SIG:
+      printf("The cerficate's self-signature is inauthenticate\n");
+      break;
     }
     break;
   case UNEXPECTED_END_OF_DATA:
@@ -208,7 +226,7 @@ int main(int argc, char *argv[]) {
     // as unambiguously part of the signature.
     uinta sig_end = pub_key.exp_sig_size;
     uinta script_start = pub_key.exp_sig_size + 1;
-    if (script_start < buf_size && buf[sig_end] == '\n') {
+    if (script_start <= buf_size && buf[sig_end] == '\n') {
       byte *script = &buf[script_start];
       uinta script_size = buf_size - script_start;
       if (pub_key_verify(&pub_key, script, script_size, buf, sig_end)) {
@@ -217,8 +235,6 @@ int main(int argc, char *argv[]) {
       } else {
         printf("Remote bash script had an invalid signature, aborting execution\n");
       }
-    } else if (script_start == buf_size) {
-      printf("Remote bash script was empty, aborting execution\n");
     } else {
       printf("Remote bash script did not contain a signature, aborting execution\n");
     }

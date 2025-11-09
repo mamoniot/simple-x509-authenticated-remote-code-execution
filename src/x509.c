@@ -5,30 +5,6 @@
 
 #include "x509.h"
 
-#define MAX_EXTN 64
-
-const byte DER_CONSTRUCTED = 0b00100000;
-const byte DER_BOOLEAN = 1;
-const byte DER_INTEGER = 2;
-const byte DER_BITSTRING = 3;
-const byte DER_OCTET_STRING = 4;
-const byte DER_OID = 6;
-const byte DER_SEQUENCE = DER_CONSTRUCTED | 16;
-const byte DER_SET = DER_CONSTRUCTED | 17;
-const byte DER_UTCTIME = 23;
-const byte DER_GENERALIZEDTIME = 24;
-
-const byte DER_EXPLICIT_0 = 0b10100000;
-const byte DER_IMPLICIT_0 = 0b10000000;
-const byte DER_IMPLICIT_1 = 0b10000001;
-const byte DER_IMPLICIT_2 = 0b10000010;
-const byte DER_EXPLICIT_3 = 0b10100011;
-
-const byte DER_LENGTH_FORM_MASK = 0b10000000;
-const byte DER_LENGTH_INDEFINITE = 0b10000000;
-const byte DER_LENGTH_RESERVED = 0b11111111;
-
-const byte X509_ACCEPTED_VERSION = 2;
 
 typedef struct {
   const byte *oid;
@@ -113,6 +89,21 @@ StatusCode parse_data_element(byte *raw_cert, uint8 expected_identifier, uinta *
   if (identifier != expected_identifier) {
     return UNEXPECTED_IDENTIFIER;
   }
+  return OK;
+}
+
+StatusCode parse_null(byte *raw_cert, uinta *idx, uinta parent_end) {
+  uint8 identifier = 0;
+  if (*idx + 2 > parent_end) {
+    return UNEXPECTED_END_OF_DATA;
+  }
+  if (raw_cert[*idx] != 0x05) {
+    return UNEXPECTED_IDENTIFIER;
+  }
+  if (raw_cert[*idx + 1] != 0x00) {
+    return INVALID_LENGTH_FORM;
+  }
+  *idx += 2;
   return OK;
 }
 

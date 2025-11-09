@@ -4,6 +4,30 @@
 #include "basic.h"
 
 #define IDX_NONE 0
+#define MAX_EXTN 64
+
+#define DER_CONSTRUCTED 0b00100000
+#define DER_BOOLEAN 1
+#define DER_INTEGER 2
+#define DER_BITSTRING 3
+#define DER_OCTET_STRING 4
+#define DER_OID 6
+#define DER_SEQUENCE (DER_CONSTRUCTED | 16)
+#define DER_SET (DER_CONSTRUCTED | 17)
+#define DER_UTCTIME 23
+#define DER_GENERALIZEDTIME 24
+
+#define DER_EXPLICIT_0 0b10100000
+#define DER_IMPLICIT_0 0b10000000
+#define DER_IMPLICIT_1 0b10000001
+#define DER_IMPLICIT_2 0b10000010
+#define DER_EXPLICIT_3 0b10100011
+
+#define DER_LENGTH_FORM_MASK 0b10000000
+#define DER_LENGTH_INDEFINITE 0b10000000
+#define DER_LENGTH_RESERVED 0b11111111
+
+#define X509_ACCEPTED_VERSION 2
 
 typedef struct {
   // Must be present.
@@ -68,5 +92,11 @@ typedef enum {
 } StatusCode;
 
 StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields *ret_fields);
+
+StatusCode parse_data_element(byte *raw_cert, uint8 expected_identifier, uinta *idx,
+                              uinta parent_end, uinta *ret_content_end);
+StatusCode parse_null(byte *raw_cert, uinta *idx, uinta parent_end);
+StatusCode parse_bitstring_no_unused(byte *raw_cert, uinta *idx, uinta parent_end,
+                                     uinta *ret_content_end);
 
 #endif
