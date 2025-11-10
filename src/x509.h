@@ -150,6 +150,24 @@
    -- and/or nonRepudiation*/
 #define KEY_USAGE_FLAG_OCSP_SIGN (1 << 22)
 
+// Struct that contains indices to individual fields of an x509 certificate.
+// The function parse_x509 will fill out this structure based on the x509 certificate it was passed.
+// When using this struct, some familiarity with rfc5280 is expected.
+//
+// Members with the suffix _start indicate that they are the index of the first byte of their field.
+// Members with the suffix _end indicate that they are the index of the byte after the last byte of
+// their field. So &raw_cert[sig_start] would point to the first byte of the certificate's
+// signature, and sig_end - sig_start is the size in bytes of that signature.
+//
+// Some members are marked as optional. Only in those cases they may have a value of IDX_NONE, which
+// indicates that the original certificate did not contain the field associated with this member.
+// All indices not equal to IDX_NONE are guaranteed to be within the bounds of the certificate
+// passed to parse_x509.
+//
+// start-end index semantics were used because they massively simplify parsing and they avoid the
+// ambiguity and risk that raw pointer members would pose if they were written to a return structure
+// like this. It is very clear that this structure contains only numbers, and as such has no
+// lifetime requirements nor handling rules associated with the memory of the original ceriticate.
 typedef struct {
   // Must be present.
   uinta sig_id_start;
@@ -179,35 +197,57 @@ typedef struct {
   uinta signed_data_start;
   uinta signed_data_end;
 
-  // Optional.
+  // Optional, will equal IDX_NONE if empty.
+  uinta cert_serial_start;
+  uinta cert_serial_end;
+
+  // Optional, will equal IDX_NONE if empty.
   uinta skid_start;
   uinta skid_end;
 
-  // Optional.
+  // Optional, will equal IDX_NONE if empty.
   uinta akid_start;
   uinta akid_end;
 
-  // Must be present.
+  // Must be present. Contains the not_before field of the certificate, converted to a unix timestamp.
   time_t not_before;
+  // Must be present. Contains the not_before field of the certificate, converted to a unix
+  // timestamp. This will be a very large timestamp (usually 99991231235959Z) if this certificate has
+  // no definite expiration.
   time_t not_after;
 
-  // Must be present.
+  // Will be true if and only if the certificate had the basic constraint extension and that
+  // extension contained CA:TRUE. This field must be true if this certificate's public key is
+  // allowed to sign certificates.
   bool key_cert_sign;
-  // uint32 path_len_constraint;
+  // This will be assigned -1 (aka the maximum value of a uint32) if path len was not specified in
+  // the basic constraint extension. This will be assigned 0 if key_cert_sign is false.
+  uint32 path_len_constraint;
 
+  // Will be true if and only if the certificate had the key usage extension.
   bool has_key_usage;
+  // Will be true if and only if the certificate had the extended key usage extension.
   bool has_ext_key_usage;
+  // A set of bit flags that summarize the contents of both the key usage and extended key usage
+  // extensions of x509. Bitwise operations may be used to extract valid usages for the key
+  // specified. If the key usage or extended key usage extensions are missing, their associated
+  // flags on this field will be set to 0. To check whether or not the key usage or extended key
+  // usage extensions where present on the certificate has_key_usage or has_ext_key_usage should be
+  // used instead.
   uint32 key_usage_flags;
 } x509Fields;
 
+// Status code for attempting to parse a x509 certificate.
+// PARSE_OK is the only "success" code, all others are errors.
 typedef enum {
-  OK,
+  PARSE_OK,
   UNEXPECTED_END_OF_DATA,
   UNEXPECTED_IDENTIFIER,
   INVALID_LENGTH_FORM,
   TRAILING_DATA,
   INVALID_VERSION,
   INVALID_BOOLEAN,
+  INVALID_INTEGER,
   INVALID_BITSTRING,
   INVALID_VALIDITY_TIME,
   MISMATCHED_SIG_ID,
@@ -215,14 +255,34 @@ typedef enum {
   DUPLICATE_EXTNS,
   UNRECOGNIZED_CRITICAL_EXTN,
   INVALID_CRITICALITY,
-} StatusCode;
+} ParseCode;
 
-StatusCode parse_x509(byte *raw_cert, uinta raw_cert_size, x509Fields *ret_fields);
+// Parse the x509 contained in raw_cert and raw_cert_size in full. The return value will be PARSE_OK
+// on success, or some other error code on failure.
+//
+// ret_fields will be overwritten and fully initialized with the parsed contents of the certificate
+// if this function returns PARSE_OK. The contents of ret_fields are undefined and liable to change
+// for any other return value.
+ParseCode parse_x509(const byte *raw_cert, uinta raw_cert_size, x509Fields *ret_fields);
 
-StatusCode parse_data_element(byte *raw_cert, uint8 expected_identifier, uinta *idx,
-                              uinta parent_end, uinta *ret_content_end);
-StatusCode parse_null(byte *raw_cert, uinta *idx, uinta parent_end);
-StatusCode parse_bitstring_no_unused(byte *raw_cert, uinta *idx, uinta parent_end,
-                                     uinta *ret_content_end);
+// Parse an individual data element of an ASN.1 encoded object. raw_asn1 must point to an ans1
+// encoding that is at least parent_end bytes long. This function will look for a field of type
+// expected_identifier at byte raw_asn1[*idx].
+//
+// If PARSE_OK is returned, idx will be incremented to point at the begining of the contents of
+// the chosen data field, and ret_content_end will be overwritten with the index of the end of such
+// content. So raw_asn1[*ret_content_end] will either be the start of the next field or a buffer
+// overflow. The contents of idx and ret_content_end are undefined and liable to change for any
+// other return value.
+//
+// Ensures that *idx <= *ret_content_end <= parent_end after returning PARSE_OK.
+ParseCode parse_data_element(const byte *raw_asn1, uint8 expected_identifier, uinta *idx,
+                             uinta parent_end, uinta *ret_content_end);
+// This function follows the similar semantics to parse_data_element.
+//
+// Parse the null value of an ASN.1 encoded object. If PARSE_OK is returned, idx will be incremented
+// to point at the end of the null value. So raw_asn1[*idx] will either be the start of the next
+// field or a buffer overflow.
+ParseCode parse_null(const byte *raw_asn1, uinta *idx, uinta parent_end);
 
 #endif

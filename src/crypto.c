@@ -11,16 +11,21 @@
 typedef struct {
   const byte *oid;
   uinta oid_size;
-  ExtractCode (*extract_key)(byte *, const x509Fields *, PubKey *);
+  ExtractCode (*extract_key)(const byte *, const x509Fields *, PubKey *);
   bool (*verify_sig)(PubKey *, const byte *, uinta, const byte *, uinta);
   void (*free)(PubKey *);
 } SupportedAlg;
 
-bool certeq(byte *raw_cert, uinta start0, uinta end0, uinta start1, uinta end1) {
+bool certeq(const byte *raw_cert, uinta start0, uinta end0, uinta start1, uinta end1) {
   return memeq(&raw_cert[start0], end0 - start0, &raw_cert[start1], end1 - start1);
 }
 
-ExtractCode ed_extract(byte *raw_cert, const x509Fields *fields, int key_type,
+// Extracts an ed448 or ed25519 public key, parsing and verifying all algorithms fields as
+// necessary.
+//
+// NOTE: This function can only support self-signed certificates, a refactor would be necessary
+// to support certificate chains, which was the case anyways.
+ExtractCode ed_extract(const byte *raw_cert, const x509Fields *fields, int key_type,
                        PubKey *ret_pub_key) {
   // There must not be a params field.
   if (fields->pub_key_oid_end != fields->pub_key_id_end) {
@@ -42,24 +47,30 @@ ExtractCode ed_extract(byte *raw_cert, const x509Fields *fields, int key_type,
 
   ret_pub_key->openssl.pkey = pkey;
   ret_pub_key->openssl.md = NULL;
+  ret_pub_key->openssl.md_ctx = EVP_MD_CTX_new();
+  if (ret_pub_key->openssl.md_ctx == NULL) {
+    return INVALID_PUB_KEY;
+  }
   return CERT_OK;
 }
 
-ExtractCode ed25519_extract(byte *raw_cert, const x509Fields *fields, PubKey *ret_pub_key) {
+ExtractCode ed25519_extract(const byte *raw_cert, const x509Fields *fields, PubKey *ret_pub_key) {
   ret_pub_key->exp_sig_size = 64;
   return ed_extract(raw_cert, fields, EVP_PKEY_ED25519, ret_pub_key);
 }
-ExtractCode ed448_extract(byte *raw_cert, const x509Fields *fields, PubKey *ret_pub_key) {
+ExtractCode ed448_extract(const byte *raw_cert, const x509Fields *fields, PubKey *ret_pub_key) {
   ret_pub_key->exp_sig_size = 114;
   return ed_extract(raw_cert, fields, EVP_PKEY_ED448, ret_pub_key);
 }
 
-ExtractCode rsa_extract(byte *raw_cert, const x509Fields *fields, PubKey *ret_pub_key) {
+// Extracts an RSA public key, parsing and verifying all algorithms fields as necessary.
+//
+// NOTE: This function can only support self-signed certificates, a refactor would be necessary
+// to support certificate chains, which was the case anyways.
+ExtractCode rsa_extract(const byte *raw_cert, const x509Fields *fields, PubKey *ret_pub_key) {
   const byte RSA_SHA256_OID[] = {0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b};
   const byte RSA_SHA384_OID[] = {0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0c};
   const byte RSA_SHA512_OID[] = {0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0d};
-  // NOTE: This function can only support self-signed certificates, a refactor would be necessary
-  // to support certificate chains, which was the case anyways.
 
   // Make sure public key params is null.
   uinta idx = fields->pub_key_oid_end;
@@ -69,7 +80,7 @@ ExtractCode rsa_extract(byte *raw_cert, const x509Fields *fields, PubKey *ret_pu
   }
 
   // Get sha size.
-  byte *sig_oid = &raw_cert[fields->sig_oid_start];
+  const byte *sig_oid = &raw_cert[fields->sig_oid_start];
   uinta sig_oid_size = fields->sig_oid_end - fields->sig_oid_start;
 
   if (memeq(sig_oid, sig_oid_size, RSA_SHA256_OID, sizeof(RSA_SHA256_OID))) {
@@ -87,12 +98,12 @@ ExtractCode rsa_extract(byte *raw_cert, const x509Fields *fields, PubKey *ret_pu
   // practice, since such errors are sometimes used as components of exploit chains.
   idx = fields->pub_key_start;
   uinta seq_end = 0;
-  if (parse_data_element(raw_cert, DER_SEQUENCE, &idx, fields->pub_key_end, &seq_end) != OK) {
+  if (parse_data_element(raw_cert, DER_SEQUENCE, &idx, fields->pub_key_end, &seq_end) != PARSE_OK) {
     return INVALID_PUB_KEY;
   }
 
   uinta modulus_end = 0;
-  if (parse_data_element(raw_cert, DER_INTEGER, &idx, seq_end, &modulus_end) != OK) {
+  if (parse_data_element(raw_cert, DER_INTEGER, &idx, seq_end, &modulus_end) != PARSE_OK) {
     return INVALID_PUB_KEY;
   }
 
@@ -100,7 +111,7 @@ ExtractCode rsa_extract(byte *raw_cert, const x509Fields *fields, PubKey *ret_pu
   idx = modulus_end;
 
   uinta exp_end = 0;
-  if (parse_data_element(raw_cert, DER_INTEGER, &idx, seq_end, &exp_end) != OK) {
+  if (parse_data_element(raw_cert, DER_INTEGER, &idx, seq_end, &exp_end) != PARSE_OK) {
     return INVALID_PUB_KEY;
   }
   if (exp_end != seq_end) {
@@ -181,7 +192,10 @@ ExtractCode rsa_extract(byte *raw_cert, const x509Fields *fields, PubKey *ret_pu
   }
   assert(ret_pub_key->openssl.pkey != NULL);
 
-  ret = CERT_OK;
+  ret_pub_key->openssl.md_ctx = EVP_MD_CTX_new();
+  if (ret_pub_key->openssl.md_ctx != NULL) {
+    ret = CERT_OK;
+  }
 
 out:
   // OpenSSL objects have weird ownership rules, so should be freed at the same time.
@@ -198,36 +212,35 @@ out:
   return ret;
 }
 
+// Uses OpenSSL's EVP_Digest library to verify a public key signature.
 bool openssl_verify(PubKey *pub_key, const byte *data, uinta data_size,
                const byte *sig, uinta sig_size) {
   if (sig_size != pub_key->exp_sig_size) {
     return false;
   }
-  // TODO: Reuse this context.
-  EVP_MD_CTX *ctx = EVP_MD_CTX_new();
-  if (ctx == NULL) {
+  assert(pub_key->openssl.md_ctx != NULL);
+
+  if (EVP_DigestVerifyInit(pub_key->openssl.md_ctx, NULL, pub_key->openssl.md, NULL,
+                           pub_key->openssl.pkey) == 0) {
     return false;
   }
 
-  if (EVP_DigestVerifyInit(ctx, NULL, pub_key->openssl.md, NULL, pub_key->openssl.pkey) == 0) {
-    EVP_MD_CTX_free(ctx);
-    return false;
-  }
-
-  bool ret = EVP_DigestVerify(ctx, sig, sig_size, data, data_size) == 1;
-  EVP_MD_CTX_free(ctx);
-  return ret;
+  return EVP_DigestVerify(pub_key->openssl.md_ctx, sig, sig_size, data, data_size) == 1;
 }
 #define ed25519_verify openssl_verify
 #define ed448_verify openssl_verify
 #define rsa_verify openssl_verify
 
-void openssl_free(PubKey *pub_key) { EVP_PKEY_free(pub_key->openssl.pkey); }
+void openssl_free(PubKey *pub_key) {
+  EVP_PKEY_free(pub_key->openssl.pkey);
+  EVP_MD_CTX_free(pub_key->openssl.md_ctx);
+}
 #define ed448_free openssl_free
 #define ed25519_free openssl_free
 #define rsa_free openssl_free
 
 #define TABULATE(...) {__VA_ARGS__}
+// Macro to automatically and correctly declare a new supported crypto algorithm.
 #define DECL_ALG(name, oid)                                                                        \
   static const byte MACRO_CAT(name, _oid)[] = oid;                                                 \
   static const SupportedAlg name = {MACRO_CAT(name, _oid), sizeof(MACRO_CAT(name, _oid)),          \
@@ -238,10 +251,12 @@ DECL_ALG(ed25519, TABULATE(0x2b, 0x65, 0x70));
 DECL_ALG(ed448, TABULATE(0x2b, 0x65, 0x71));
 DECL_ALG(rsa, TABULATE(0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01));
 
+// List of supported crypto algorithms. It is designed to be easy to extend using the above macros.
 const SupportedAlg supported_algs[] = {ed25519, ed448, rsa};
 const uinta supported_algs_size = sizeof(supported_algs) / sizeof(supported_algs[0]);
 
-ExtractCode pub_key_extract(byte *raw_cert, const x509Fields *fields, PubKey *ret_pub_key) {
+// Searches for a supported public key oid that matches this certificate's pub_key_oid.
+ExtractCode pub_key_extract(const byte *raw_cert, const x509Fields *fields, PubKey *ret_pub_key) {
   for_each_idx(const SupportedAlg, idx, alg, supported_algs, supported_algs_size) {
     if (memeq(alg->oid, alg->oid_size, &raw_cert[fields->pub_key_oid_start],
               fields->pub_key_oid_end - fields->pub_key_oid_start)) {
@@ -254,7 +269,7 @@ ExtractCode pub_key_extract(byte *raw_cert, const x509Fields *fields, PubKey *re
   return UNSUPPORTED_ALG;
 }
 
-ExtractCode extract_self_sign_for_code_sign(byte *raw_cert, const x509Fields *fields, time_t now,
+ExtractCode extract_self_sign_for_code_sign(const byte *raw_cert, const x509Fields *fields, time_t now,
                               PubKey *ret_pub_key) {
   if (fields->not_before > now || fields->not_after < now) {
     return EXPIRED;
@@ -269,14 +284,15 @@ ExtractCode extract_self_sign_for_code_sign(byte *raw_cert, const x509Fields *fi
   if (is_skid != is_akid) {
     return INVALID_SELF_SIGN;
   }
-  if (is_skid && is_akid &&
-      !certeq(raw_cert, fields->skid_start, fields->skid_end, fields->akid_start,
-               fields->akid_end)) {
+  if (is_skid && !certeq(raw_cert, fields->skid_start, fields->skid_end, fields->akid_start,
+                         fields->akid_end)) {
     return INVALID_SELF_SIGN;
   }
-  // TODO: Consider comparing issuer and subject names.
+  // NOTE: This do not check issuer names in the akid extensions. I decided not to support names in
+  // general since such names are near meaningless within a TCP code-signing context, and are much
+  // more error prone than their high-entropy identifier counterparts.
 
-  // We are going to require both key usage and extended key usage extensions.
+  // We require both key usage and extended key usage extensions on this certificate.
   uint32 mask = KEY_USAGE_FLAG_SIGN | KEY_USAGE_FLAG_KEY_CERT_SIGN | KEY_USAGE_FLAG_CODE_SIGNING;
   if (!fields->has_key_usage || !fields->has_ext_key_usage || (fields->key_usage_flags & mask) != mask) {
     return INVALID_USAGE;
@@ -307,6 +323,8 @@ bool pub_key_verify(PubKey *pub_key, const byte *data, uinta data_size, const by
 }
 
 void pub_key_free(PubKey *pub_key) {
-  assert(pub_key->alg_idx < supported_algs_size);
-  return supported_algs[pub_key->alg_idx].free(pub_key);
+  if (pub_key != NULL) {
+    assert(pub_key->alg_idx < supported_algs_size);
+    supported_algs[pub_key->alg_idx].free(pub_key);
+  }
 }

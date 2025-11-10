@@ -22,16 +22,17 @@ const uinta MAX_SCRIPT_SIZE = 2 * GIGABYTE;
 const uinta TCP_RECV_TIMEOUT_SECS = 5;
 const uinta TCP_MAX_TIMEOUT_SECS = 60;
 
-void exec_script(byte *script, uinta script_size) {
+// Execture the bash script contained in script and script_size in a new process with shared stdout.
+void exec_script(byte *script, uinta script_size, uint32 script_n) {
   int in_pipe[2] = {0};
   if (pipe(in_pipe) < 0) {
-    printf("Failed to create a pipe for executing the remote bash script\n");
+    printf("Failed to create a pipe for executing remote bash script #%d\n", script_n);
     return;
   }
 
   pid_t pid = fork();
   if (pid < 0) {
-    printf("Failed to create a child process for the remote bash script\n");
+    printf("Failed to create a child process for remote bash script #%d\n", script_n);
     return;
   }
 
@@ -42,7 +43,7 @@ void exec_script(byte *script, uinta script_size) {
     dup2(in_pipe[0], STDIN_FILENO);
     close(in_pipe[1]);
 
-    printf("Remote bash script received and authenticated, executing now...\n");
+    printf("Remote bash script #%d received and authenticated, executing now...\n", script_n);
     const char* BASH = "bash";
     int ret = execlp(BASH, BASH, NULL);
     fflush(stdout);
@@ -57,6 +58,8 @@ void exec_script(byte *script, uinta script_size) {
   waitpid(pid, NULL, 0);
 }
 
+// ret_pub_key will be overwritten with a new public key if this function returns true. The
+// contents of ret_pub_key are undefined and liable to change for any other return value.
 bool read_cert(const char *path, PubKey *ret_pub_key) {
   int fd = open(path, O_RDONLY);
   if (fd < 0) {
@@ -73,6 +76,7 @@ bool read_cert(const char *path, PubKey *ret_pub_key) {
   }
   uinta raw_cert_size = st.st_size;
 
+  // mmap the file so we don't have to allocate and copy its contents.
   byte *raw_cert = mmap(0, raw_cert_size, PROT_READ, MAP_SHARED, fd, 0);
   if (raw_cert == MAP_FAILED) {
     printf("mmap failed with errno = %d\n", errno);
@@ -80,10 +84,11 @@ bool read_cert(const char *path, PubKey *ret_pub_key) {
     return false;
   }
 
+  // Parse and subsequently verify the certificate.
   bool is_pub_key_populated = false;
   x509Fields fields = {0};
   switch (parse_x509(raw_cert, raw_cert_size, &fields)) {
-  case OK:
+  case PARSE_OK:
     switch (extract_self_sign_for_code_sign(raw_cert, &fields, time(NULL), ret_pub_key)) {
     case CERT_OK:
       is_pub_key_populated = true;
@@ -130,6 +135,9 @@ bool read_cert(const char *path, PubKey *ret_pub_key) {
     break;
   case INVALID_BOOLEAN:
     printf("Encountered invalid boolean value in certificate (%s)\n", path);
+    break;
+  case INVALID_INTEGER:
+    printf("Encountered invalid integer value in certificate (%s)\n", path);
     break;
   case INVALID_VALIDITY_TIME:
     printf("Encountered invalid certificate validity timestamp (%s)\n", path);
@@ -259,6 +267,7 @@ int main(int argc, char *argv[]) {
 
   byte *buf = malloc(KILOBYTE);
   uinta buf_cap = KILOBYTE;
+  uint32 script_n = 0;
 
   while (true) {
     struct sockaddr_in clien_addr = {0};
@@ -332,8 +341,9 @@ int main(int argc, char *argv[]) {
         uinta script_size = buf_size - script_start;
         if (pub_key_verify(pub_key, script, script_size, buf, sig_end)) {
           // The signature is valid, so execute the script.
-          exec_script(script, script_size);
           is_authentic = true;
+          script_n += 1;
+          exec_script(script, script_size, script_n);
           break;
         }
       }
