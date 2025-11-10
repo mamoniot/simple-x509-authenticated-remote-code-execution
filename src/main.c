@@ -11,10 +11,10 @@
 #include "unistd.h"
 #include "dirent.h"
 
-
 #include "x509.h"
 #include "crypto.h"
 #include "basic.h"
+#include <string.h>
 
 const int TCP_BACKLOG = 16;
 const uint16 DEFAULT_PORT = 56544;
@@ -63,14 +63,14 @@ void exec_script(byte *script, uinta script_size, uint32 script_n) {
 bool read_cert(const char *path, PubKey *ret_pub_key) {
   int fd = open(path, O_RDONLY);
   if (fd < 0) {
-    printf("Unable to open input file: %s\n", path);
+    printf("Unable to open input file: '%s'\n", path);
     return false;
   }
 
   struct stat st;
   int code = fstat(fd, &st);
   if (code < 0) {
-    printf("fstat on file %s failed with err %d\n", path, code);
+    printf("fstat on file '%s' failed with err %d\n", path, code);
     close(fd);
     return false;
   }
@@ -79,7 +79,11 @@ bool read_cert(const char *path, PubKey *ret_pub_key) {
   // mmap the file so we don't have to allocate and copy its contents.
   byte *raw_cert = mmap(0, raw_cert_size, PROT_READ, MAP_SHARED, fd, 0);
   if (raw_cert == MAP_FAILED) {
-    printf("mmap failed with errno = %d\n", errno);
+    if (errno == ENODEV) {
+      printf("Skipping '%s' since it is not a file\n", path);
+    } else {
+      printf("mmap of '%s' failed with errno = %d\n", path, errno);
+    }
     close(fd);
     return false;
   }
@@ -169,7 +173,7 @@ bool read_cert(const char *path, PubKey *ret_pub_key) {
 
 int main(int argc, char *argv[]) {
   if (argc < 2) {
-    printf("%s: Missing file operand\n", argv[0]);
+    printf("%s: Missing file or directory of trusted x509 certificate(s)\n", argv[0]);
     return -1;
   }
   char *path = argv[1];
@@ -195,6 +199,12 @@ int main(int argc, char *argv[]) {
       return - 1;
     }
 
+    uinta full_file_path_cap = KILOBYTE;
+    char *full_file_path = malloc(KILOBYTE);
+    uinta path_len = strlen(path);
+    assert(path_len > 1);
+    bool has_sep = path[path_len - 1] == '/';
+
     while (true) {
       struct dirent *entry = readdir(dir);
       if (entry == NULL) {
@@ -208,13 +218,30 @@ int main(int argc, char *argv[]) {
         if (keys_cap == 1) {
           keys_cap = 8;
           keys = malloct(PubKey, 8);
+          // Copy over key and zeroize it for safety.
+          *keys = one_key;
+          memzrot(&one_key, 1);
         } else {
           keys_cap *= 2;
           keys = realloct(PubKey, keys, keys_cap);
         }
       }
+
+      // This is not a very efficient or portable way to concatenate file paths, but the correct
+      // version is time consuming to write. This is good enough.
+      uinta total_size = path_len + 1 + strlen(entry->d_name) + 1;
+      if (total_size > full_file_path_cap) {
+        full_file_path_cap = total_size;
+        full_file_path = realloc(full_file_path, total_size);
+      }
+      if (has_sep) {
+        sprintf(full_file_path, "%s%s", path, entry->d_name);
+      } else {
+        sprintf(full_file_path, "%s/%s", path, entry->d_name);
+      }
+
       assert(keys_size < keys_cap);
-      if (read_cert(entry->d_name, &keys[keys_size])) {
+      if (read_cert(full_file_path, &keys[keys_size])) {
         keys_size += 1;
       }
     }
@@ -248,11 +275,12 @@ int main(int argc, char *argv[]) {
   tv.tv_sec = TCP_RECV_TIMEOUT_SECS;
   tv.tv_usec = 0;
 
-  // Set a timeout so that recv is much less of a DDOS vector.
-  if (setsockopt(sock_fd, SOL_SOCKET, SO_RCVTIMEO, cast(const char *, &tv), sizeof(tv)) < 0) {
-    printf("Could not assign a recv timeout to tcp socket\n");
-    // We do not consider this fatal.
-  }
+  // TODO: support concurrency properly since anything lesser will have DDOS problems.
+  // // Set a timeout so that recv is much less of a DDOS vector.
+  // if (setsockopt(sock_fd, SOL_SOCKET, SO_RCVTIMEO, cast(const char *, &tv), sizeof(tv)) < 0) {
+  //   printf("Could not assign a recv timeout to tcp socket\n");
+  //   // We do not consider this fatal.
+  // }
 
   if (bind(sock_fd, cast(struct sockaddr *, &server_addr), sizeof(server_addr)) < 0) {
     close(sock_fd);
@@ -300,12 +328,10 @@ int main(int argc, char *argv[]) {
           buf = realloc(buf, buf_cap);
         }
       } else {
-        if (errno != EAGAIN && errno != EWOULDBLOCK) {
-          // Null terminate the buffer for safety. It is not within buf_size and should go unused.
-          buf[buf_size] = 0;
-          retry = false;
-          break;
-        }
+        // Null terminate the buffer for safety. It is not within buf_size and should go unused.
+        buf[buf_size] = 0;
+        retry = false;
+        break;
       }
 
       clock_t dur = (clock() - start_time)/CLOCKS_PER_SEC;
