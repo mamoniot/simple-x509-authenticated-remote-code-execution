@@ -6,11 +6,6 @@
 
 // A struct containing a generic public key. Use extract_self_sign_for_code_sign to create one.
 //
-// exp_sig_size is read-only and contains the fixed size in bytes of a signature from this type of
-// public key. alg_idx is read-only and contains an internal identifier that is unique to both the
-// specific public key algorithm used by this public key *and* the cryptography provider which
-// implements the algorithm. All other fields are not intended for public use.
-//
 // This structure is effectively a discriminated union, with alg_idx acting as the discriminant.
 // It is designed specifically to support backwards-compatible extension with new public key
 // algorithms and crypto providers. OpenSSL can be replaced in whole or in part, down to individual
@@ -18,8 +13,17 @@
 // incompatible versions, is slow to add new algorithms, has had numerous CVEs, and has a
 // heinous legacy API.
 typedef struct PubKey {
+  // Read only field containing the unix timestamp at which this key expires. The user must be
+  // certain that this key has not expired before using it, if possible.
+  time_t expiry;
+  // Read only field containing the expected fixed size in bytes of a signature from this type of
+  // public key.
   uinta exp_sig_size;
+  // Read-only field containing an internal identifier that is unique to both the
+  // specific public key algorithm used by this public key *and* the cryptography provider which
+  // implements the algorithm.
   uint32 alg_idx;
+  // This union is not intended for use outside of crypto.c.
   union {
     struct {
       void *pkey;
@@ -34,6 +38,7 @@ typedef struct PubKey {
 typedef enum {
   CERT_OK,
   EXPIRED,
+  NOT_BEFORE,
   INVALID_USAGE,
   INVALID_SELF_SIGN,
   INVALID_SIG,

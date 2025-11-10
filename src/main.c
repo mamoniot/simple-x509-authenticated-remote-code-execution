@@ -26,30 +26,39 @@ const uinta TCP_MAX_TIMEOUT_SECS = 60;
 void exec_script(byte *script, uinta script_size, uint32 script_n) {
   int in_pipe[2] = {0};
   if (pipe(in_pipe) < 0) {
-    printf("Failed to create a pipe for executing remote bash script #%d\n", script_n);
+    fprintf(stderr, "Failed to create a pipe for executing remote bash script #%d\n", script_n);
     return;
   }
 
   pid_t pid = fork();
   if (pid < 0) {
-    printf("Failed to create a child process for remote bash script #%d\n", script_n);
+    fprintf(stderr, "Failed to create a child process for remote bash script #%d\n", script_n);
+    close(in_pipe[0]);
+    close(in_pipe[1]);
     return;
   }
 
-  // Past this point we assume execution was successful. The following system calls should never fail.
+  // Past this point we assume execution was successful. The following system calls should rarely
+  // fail and it doesn't really matter if they do fail.
   if (pid == 0) {
     // This is the child process.
     // Redirect stdin.
     dup2(in_pipe[0], STDIN_FILENO);
+    close(in_pipe[0]);
     close(in_pipe[1]);
 
-    printf("Remote bash script #%d received and authenticated, executing now...\n", script_n);
     const char* BASH = "bash";
-    int ret = execlp(BASH, BASH, NULL);
-    fflush(stdout);
-    exit(ret);
+    execlp(BASH, BASH, NULL);
+    // execlp only returns on error.
+    perror("execlp");
+    exit(-1);
   }
 
+  // We have to flush stdout for it to consistently appear before the script output.
+  printf("Remote bash script #%d received and authenticated, executing now...\n", script_n);
+  fflush(stdout);
+
+  // This write could deadlock if we ran a command other than bash.
   write(in_pipe[1], script, script_size);
 
   close(in_pipe[0]);
@@ -63,26 +72,32 @@ void exec_script(byte *script, uinta script_size, uint32 script_n) {
 bool read_cert(const char *path, PubKey *ret_pub_key) {
   int fd = open(path, O_RDONLY);
   if (fd < 0) {
-    printf("Unable to open input file: '%s'\n", path);
+    fprintf(stderr, "Unable to open input file: '%s'\n", path);
     return false;
   }
 
   struct stat st;
   int code = fstat(fd, &st);
   if (code < 0) {
-    printf("fstat on file '%s' failed with err %d\n", path, code);
+    fprintf(stderr, "fstat on file '%s' failed with err %d\n", path, code);
     close(fd);
     return false;
   }
-  uinta raw_cert_size = st.st_size;
+  inta raw_cert_size = st.st_size;
+
+  if (raw_cert_size <= 0) {
+    fprintf(stderr, "'%s' does not contain data\n", path);
+    close(fd);
+    return false;
+  }
 
   // mmap the file so we don't have to allocate and copy its contents.
   byte *raw_cert = mmap(0, raw_cert_size, PROT_READ, MAP_SHARED, fd, 0);
   if (raw_cert == MAP_FAILED) {
     if (errno == ENODEV) {
-      printf("Skipping '%s' since it is not a file\n", path);
+      fprintf(stderr, "'%s' is not a file\n", path);
     } else {
-      printf("mmap of '%s' failed with errno = %d\n", path, errno);
+      fprintf(stderr, "mmap of '%s' failed with errno = %d\n", path, errno);
     }
     close(fd);
     return false;
@@ -98,71 +113,74 @@ bool read_cert(const char *path, PubKey *ret_pub_key) {
       is_pub_key_populated = true;
       break;
     case EXPIRED:
-      printf("This cerficate has expired (%s)\n", path);
+      fprintf(stderr, "Cerficate has expired (%s)\n", path);
+      break;
+    case NOT_BEFORE:
+      fprintf(stderr, "Cerficate is dated into the future (%s)\n", path);
       break;
     case INVALID_SELF_SIGN:
-      printf("This cerficate is not self-signed (%s)\n", path);
+      fprintf(stderr, "Cerficate is not self-signed (%s)\n", path);
       break;
     case INVALID_USAGE:
-      printf("This cerficate has restricted usage, it must explicitly allow code signing and "
+      fprintf(stderr, "Cerficate has restricted usage, it must explicitly allow code signing and "
              "certificate signing (%s)\n",
              path);
       break;
     case INVALID_PUB_KEY_PARAMS:
-      printf("This cerficate has invalid public key parameters (%s)\n", path);
+      fprintf(stderr, "Cerficate has invalid public key parameters (%s)\n", path);
       break;
     case INVALID_PUB_KEY:
-      printf("This cerficate had an invalid public key (%s)\n", path);
+      fprintf(stderr, "Cerficate had an invalid public key (%s)\n", path);
       break;
     case UNSUPPORTED_ALG:
-      printf("This cerficate uses an unsupported public key algorithm (%s)\n", path);
+      fprintf(stderr, "Cerficate uses an unsupported public key algorithm (%s)\n", path);
       break;
     case INVALID_SIG:
-      printf("This cerficate's signature could not be authenticated (%s)\n", path);
+      fprintf(stderr, "Cerficate's signature could not be authenticated (%s)\n", path);
       break;
     }
     break;
   case UNEXPECTED_END_OF_DATA:
-    printf("Certificate sequence encoding ended unexpectedly (%s)\n", path);
+    fprintf(stderr, "Certificate sequence encoding ended unexpectedly (%s)\n", path);
     break;
   case UNEXPECTED_IDENTIFIER:
-    printf("Encountered unexpected identifier in certificate (%s)\n", path);
+    fprintf(stderr, "Encountered unexpected identifier in certificate (%s)\n", path);
     break;
   case INVALID_LENGTH_FORM:
-    printf("Encountered invalid encoding length in certificate (%s)\n", path);
+    fprintf(stderr, "Encountered invalid encoding length in certificate (%s)\n", path);
     break;
   case TRAILING_DATA:
-    printf("Certificate encoding had invalid trailing data (%s)\n", path);
+    fprintf(stderr, "Certificate encoding had invalid trailing data (%s)\n", path);
     break;
   case INVALID_VERSION:
-    printf("Only v3 x509 certificates are accepted (%s)\n", path);
+    fprintf(stderr, "Only v3 x509 certificates are accepted (%s)\n", path);
     break;
   case INVALID_BOOLEAN:
-    printf("Encountered invalid boolean value in certificate (%s)\n", path);
+    fprintf(stderr, "Encountered invalid boolean value in certificate (%s)\n", path);
     break;
   case INVALID_INTEGER:
-    printf("Encountered invalid integer value in certificate (%s)\n", path);
+    fprintf(stderr, "Encountered invalid integer value in certificate (%s)\n", path);
     break;
   case INVALID_VALIDITY_TIME:
-    printf("Encountered invalid certificate validity timestamp (%s)\n", path);
+    fprintf(stderr, "Encountered invalid certificate validity timestamp (%s)\n", path);
     break;
   case MISMATCHED_SIG_ID:
-    printf("Certificate signature identifiers did not match (%s)\n", path);
+    fprintf(stderr, "Certificate signature identifiers did not match (%s)\n", path);
     break;
   case EXCEEDS_MAX_EXTNS:
-    printf("Certificate contained too many extensions (%s)\n", path);
+    fprintf(stderr, "Certificate contained too many extensions (%s)\n", path);
     break;
   case DUPLICATE_EXTNS:
-    printf("Certificate contained a duplicate extension (%s)\n", path);
+    fprintf(stderr, "Certificate contained a duplicate extension (%s)\n", path);
     break;
   case UNRECOGNIZED_CRITICAL_EXTN:
-    printf("Certificate contained an unrecognized critical extension (%s)\n", path);
+    fprintf(stderr, "Certificate contained an unrecognized critical extension (%s)\n", path);
     break;
   case INVALID_CRITICALITY:
-    printf("Certificate extension had incorrect criticality (%s)\n", path);
+    fprintf(stderr, "Certificate extension had incorrect criticality (%s)\n", path);
     break;
   case INVALID_BITSTRING:
-    printf("Encountered invalid bitstring in certificate (%s)\n", path);
+    fprintf(stderr, "Encountered invalid bitstring in certificate (%s)\n", path);
     break;
   }
 
@@ -173,14 +191,14 @@ bool read_cert(const char *path, PubKey *ret_pub_key) {
 
 int main(int argc, char *argv[]) {
   if (argc < 2) {
-    printf("%s: Missing file or directory of trusted x509 certificate(s)\n", argv[0]);
+    fprintf(stderr, "%s: Missing file or directory of trusted x509 certificates\n", argv[0]);
     return -1;
   }
   char *path = argv[1];
 
   struct stat path_stat = {0};
   if (stat(path, &path_stat) != 0) {
-    printf("Unable to retrieve file stats of %s\n", path);
+    fprintf(stderr, "Unable to retrieve file stats of %s; does it exist?\n", path);
     return -1;
   }
 
@@ -188,6 +206,7 @@ int main(int argc, char *argv[]) {
   // by the stack to avoid allocation in the common case of one key.
   PubKey one_key = {0};
   PubKey *keys = &one_key;
+  uinta attempts_total = 0;
   uinta keys_size = 0;
   uinta keys_cap = 1;
 
@@ -195,7 +214,7 @@ int main(int argc, char *argv[]) {
     // The given path is a directory, we will attempt to trust every valid certificate found within it.
     DIR *dir = opendir(path);
     if (dir == NULL) {
-      printf("Could not open certificate directory '%s'\n", path);
+      fprintf(stderr, "Could not open certificate directory '%s'\n", path);
       return - 1;
     }
 
@@ -241,6 +260,7 @@ int main(int argc, char *argv[]) {
       }
 
       assert(keys_size < keys_cap);
+      attempts_total += 1;
       if (read_cert(full_file_path, &keys[keys_size])) {
         keys_size += 1;
       }
@@ -249,8 +269,11 @@ int main(int argc, char *argv[]) {
     closedir(dir);
 
     if (keys_size == 0) {
-      printf("Could not find a valid certificate in '%s'\n", path);
+      fprintf(stderr, "Could not find a valid certificate in '%s'\n", path);
       return -1;
+    }
+    if (attempts_total != keys_size) {
+      printf("Found %d files in '%s' but only %d were valid x509 certificates; proceeding with just the valid certificates\n", cast(uint32, attempts_total), path, cast(uint32, keys_size));
     }
   } else {
     // The given path is a file, parse it as a single trusted certificate.
@@ -263,7 +286,7 @@ int main(int argc, char *argv[]) {
 
   int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
   if (sock_fd < 0) {
-    printf("Failed to open a TCP socket\n");
+    fprintf(stderr, "Failed to open a TCP socket\n");
     return -1;
   }
 
@@ -284,12 +307,12 @@ int main(int argc, char *argv[]) {
 
   if (bind(sock_fd, cast(struct sockaddr *, &server_addr), sizeof(server_addr)) < 0) {
     close(sock_fd);
-    printf("Failed to bind a TCP socket to port %d\n", DEFAULT_PORT);
+    fprintf(stderr, "Failed to bind a TCP socket to port %d\n", DEFAULT_PORT);
     return -1;
   }
   if (listen(sock_fd, TCP_BACKLOG) < 0) {
     close(sock_fd);
-    printf("Failed to listen for TCP connections\n");
+    fprintf(stderr, "Failed to listen for TCP connections\n");
     return -1;
   }
 
@@ -303,7 +326,7 @@ int main(int argc, char *argv[]) {
     int conn_fd =
         accept(sock_fd, cast(struct sockaddr *, &clien_addr), &clien_addr_size);
     if (conn_fd < 0) {
-      printf("Failed to accept a TCP connection, retrying...\n");
+      fprintf(stderr, "Failed to accept a TCP connection, retrying...\n");
       continue;
     }
 
@@ -315,12 +338,12 @@ int main(int argc, char *argv[]) {
       assert(buf_size < buf_cap);
       inta ret = recv(conn_fd, &buf[buf_size], buf_cap - buf_size, 0);
       if (ret < 0) {
-        printf("Failed to receive data from a TCP connection\n");
+        fprintf(stderr, "Failed to receive data from a TCP connection\n");
         break;
       } else if (ret > 0) {
         buf_size += ret;
         if (buf_size >= MAX_SCRIPT_SIZE) {
-          printf("TCP connection exceeded maximum allowed script size of %" PRIu64 "\n",
+          fprintf(stderr, "TCP connection exceeded maximum allowed script size of %" PRIu64 "\n",
                  MAX_SCRIPT_SIZE);
           break;
         } else if (buf_size >= buf_cap) {
@@ -336,7 +359,7 @@ int main(int argc, char *argv[]) {
 
       clock_t dur = (clock() - start_time)/CLOCKS_PER_SEC;
       if (dur >= TCP_MAX_TIMEOUT_SECS) {
-        printf("TCP connection took %d seconds and was timed-out\n", cast(uint32, dur));
+        fprintf(stderr, "TCP connection took %d seconds and was timed-out\n", cast(uint32, dur));
         break;
       }
     }
@@ -359,7 +382,24 @@ int main(int argc, char *argv[]) {
     // with the script, so we have to try to authenticate with each public key until we find a match.
     // This is safe to do just not very efficient.
     bool is_authentic = false;
-    for_each_in(PubKey, pub_key, keys, keys_size) {
+    time_t now = time(NULL);
+
+    for(int i = 0; i < keys_size; i += 1) {
+      PubKey *pub_key = &keys[i];
+      if (now > pub_key->expiry) {
+        // This key has expired and should be removed.
+        if (keys_size > 1) {
+          // Swap remove.
+          swap(PubKey, pub_key, &keys[keys_size - 1]);
+          keys_size -= 1;
+          i -= 1;
+          continue;
+        } else {
+          fprintf(stderr, "All certificates have expired, closing server\n");
+          return -1;
+        }
+      }
+
       uinta sig_end = pub_key->exp_sig_size;
       uinta script_start = pub_key->exp_sig_size + 1;
       if (script_start <= buf_size && buf[sig_end] == '\n') {
@@ -375,7 +415,7 @@ int main(int argc, char *argv[]) {
       }
     }
     if (!is_authentic) {
-      printf("Remote bash script could not be authenticated, aborting execution\n");
+      fprintf(stderr, "Remote bash script could not be authenticated, aborting execution\n");
     }
   }
 

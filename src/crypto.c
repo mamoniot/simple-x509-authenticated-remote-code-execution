@@ -271,8 +271,11 @@ ExtractCode pub_key_extract(const byte *raw_cert, const x509Fields *fields, PubK
 
 ExtractCode extract_self_sign_for_code_sign(const byte *raw_cert, const x509Fields *fields, time_t now,
                               PubKey *ret_pub_key) {
-  if (fields->not_before > now || fields->not_after < now) {
+  if (fields->not_after < now) {
     return EXPIRED;
+  }
+  if (fields->not_before > now) {
+    return NOT_BEFORE;
   }
   if (!fields->key_cert_sign) {
     return INVALID_USAGE;
@@ -306,6 +309,7 @@ ExtractCode extract_self_sign_for_code_sign(const byte *raw_cert, const x509Fiel
   if (pub_key_verify(ret_pub_key, &raw_cert[fields->signed_data_start],
                         fields->signed_data_end - fields->signed_data_start,
                         &raw_cert[fields->sig_start], fields->sig_end - fields->sig_start)) {
+    ret_pub_key->expiry = fields->not_after;
     return CERT_OK;
   } else {
     pub_key_free(ret_pub_key);

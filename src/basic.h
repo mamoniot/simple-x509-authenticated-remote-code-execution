@@ -82,7 +82,7 @@ typedef int32  inta;
 #define memzrot(ptr, size) memset(ptr, 0, sizeof(*ptr) * (size))
 #define memcpyt(ptr0, ptr1, size) memcpy(ptr0, ptr1, sizeof(*ptr0)*(size))
 #define from_cstr(str) str, strlen(str)
-#define swap(type, v0, v1) do {type* mam_t0 = (v0); type* mam_t1 = (v1); type mam_t = *mam_t0; *mam_t0 = *mam_t1; *mam_t1 = mam_t} while(0);
+#define swap(type, v0, v1) do {type* mam_t0 = (v0); type* mam_t1 = (v1); type mam_t = *mam_t0; *mam_t0 = *mam_t1; *mam_t1 = mam_t;} while(0);
 #define malloct(type, size) ((type*)malloc(sizeof(type)*(size)))
 #define realloct(type, ptr, size) ((type*)realloc(ptr, sizeof(type)*(size)))
 #define memeq(ptr0, size0, ptr1, size1) ((size0) == (size1) && memcmp(ptr0, ptr1, size1) == 0)
