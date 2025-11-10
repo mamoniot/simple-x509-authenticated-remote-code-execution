@@ -1,4 +1,7 @@
+Remote bash script #1 received and authenticated, executing now...
 hello world
+Remote bash script #2 received and authenticated, executing now...
+Remote bash script #3 received and authenticated, executing now...
 Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Sodales fringilla cursus hendrerit eros ut dui per fames accumsan feugiat vehicula est fusce metus purus. Lacinia nulla fusce sociosqu non libero ex sit sapien vivamus hendrerit. Ornare donec malesuada sociosqu nullam primis ipsum ullamcorper.
 Erat viverra amet hendrerit vehicula adipiscing nec nisi per potenti quis vestibulum neque. Fermentum aenean odio nisl molestie vitae venenatis non vehicula pretium porttitor ac lectus et dui aenean. Sem interdum class neque iaculis amet orci id aliquam vestibulum nibh diam iaculis lobortis. Aliquet posuere massa metus nisl litora torquent commodo pellentesque tellus cubilia eros. Dui placerat ad ac eros ultricies ultricies lobortis mauris mauris senectus proin.
 Duis felis sodales euismod per orci nec lacus. Felis feugiat lorem ipsum conubia fames tempor mauris hac lectus faucibus interdum. Condimentum luctus nam lacus ipsum id at turpis laoreet molestie. Rhoncus ornare dictum elementum vestibulum feugiat pretium nulla phasellus quisque cubilia.
@@ -10000,3 +10003,5 @@ Aliquam platea libero taciti eleifend lectus cras curae in taciti habitasse tinc
 Libero malesuada ante velit pretium dignissim hendrerit venenatis est consectetur risus. Convallis phasellus est odio sollicitudin ut feugiat ornare. Donec volutpat orci vestibulum maecenas id aptent curae suscipit laoreet cursus.
 Senectus convallis lectus porttitor sed venenatis mattis elementum tristique non laoreet fusce ante litora massa facilisis. Suscipit eu torquent odio vel aliquam aptent malesuada justo litora maximus eu sociosqu condimentum varius eros. Rhoncus leo tempus nec urna felis augue imperdiet turpis. Tincidunt senectus eleifend bibendum netus torquent cras vel ultricies tortor.
 Final line.
+Remote bash script could not be authenticated, aborting execution
+Remote bash script could not be authenticated, aborting execution

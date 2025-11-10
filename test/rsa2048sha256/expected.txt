@@ -1,1 +1,1 @@
-This cerficate uses an unsupported public key algorithm
+Cerficate uses an unsupported public key algorithm (test/rsa2048sha256/cert.der)

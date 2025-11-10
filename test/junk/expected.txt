@@ -1,0 +1,9 @@
+Certificate sequence encoding ended unexpectedly (test/junk/cert.der/trailing_key.der)
+Encountered unexpected identifier in certificate (test/junk/cert.der/large.txt)
+Cerficate's signature could not be authenticated (test/junk/cert.der/corrupted_sig.der)
+'test/junk/cert.der/empty.txt' does not contain data
+'test/junk/cert.der/invalid_sub' is not a file
+Cerficate is dated into the future (test/junk/cert.der/time_travel.der)
+Cerficate has expired (test/junk/cert.der/expired.der)
+Encountered invalid certificate validity timestamp (test/junk/cert.der/corrupted_date.der)
+Could not find a valid certificate in 'test/junk/cert.der'

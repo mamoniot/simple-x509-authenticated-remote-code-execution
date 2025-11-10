@@ -22,12 +22,12 @@ pid=$!
 
 sleep 1
 
-test/gen_sig.exe $1/priv.key test/scripts/hello.sh $2 | nc -q 1 127.0.0.1 56544
-test/gen_sig.exe $1/priv.key test/scripts/empty.sh $2 | nc -q 1 127.0.0.1 56544
-test/gen_sig.exe $1/priv.key test/scripts/large.sh $2 | nc -q 1 127.0.0.1 56544
+test/gen_sig.exe $1/priv.key test/scripts/hello.sh $2 | nc -w 1 127.0.0.1 56544
+test/gen_sig.exe $1/priv.key test/scripts/empty.sh $2 | nc -w 1 127.0.0.1 56544
+test/gen_sig.exe $1/priv.key test/scripts/large.sh $2 | nc -w 1 127.0.0.1 56544
 
-test/gen_sig.exe test/wrong_code/priv.key test/scripts/hello.sh | nc -q 1 127.0.0.1 56544
-test/gen_sig.exe test/wrong_code/priv.key test/scripts/empty.sh | nc -q 1 127.0.0.1 56544
+test/gen_sig.exe test/wrong_code/priv.key test/scripts/hello.sh | nc -w 1 127.0.0.1 56544
+test/gen_sig.exe test/wrong_code/priv.key test/scripts/empty.sh | nc -w 1 127.0.0.1 56544
 
 sleep 1
 
@@ -37,7 +37,7 @@ if [[ $TEST -eq 1 ]]; then
     if diff -u "$EXPECTED" "$TEMP" > /dev/null; then
         echo "Test passed"
     else
-        echo "Output differs from expected:"
+        echo "Test failed! Incorrect output written to '$TEMP'"
         cat "$TEMP"
     fi
 else
