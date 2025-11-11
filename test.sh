@@ -19,17 +19,19 @@ fi
 
 ./server.exe $1/cert.der &> "$OUT" &
 pid=$!
+sleep 0.5
 
-sleep 1
+test/gen_sig.exe $1/priv.key test/scripts/hello.sh $2 | nc -w 1 127.0.0.1 56544 &
+sleep 0.5
+test/gen_sig.exe $1/priv.key test/scripts/empty.sh $2 | nc -w 1 127.0.0.1 56544 &
+sleep 0.5
+test/gen_sig.exe $1/priv.key test/scripts/large.sh $2 | nc -w 1 127.0.0.1 56544 &
+sleep 0.5
 
-test/gen_sig.exe $1/priv.key test/scripts/hello.sh $2 | nc -w 1 127.0.0.1 56544
-test/gen_sig.exe $1/priv.key test/scripts/empty.sh $2 | nc -w 1 127.0.0.1 56544
-test/gen_sig.exe $1/priv.key test/scripts/large.sh $2 | nc -w 1 127.0.0.1 56544
-
-test/gen_sig.exe test/wrong_code/priv.key test/scripts/hello.sh | nc -w 1 127.0.0.1 56544
-test/gen_sig.exe test/wrong_code/priv.key test/scripts/empty.sh | nc -w 1 127.0.0.1 56544
-
-sleep 1
+test/gen_sig.exe test/wrong_code/priv.key test/scripts/hello.sh | nc -w 1 127.0.0.1 56544 &
+sleep 0.5
+test/gen_sig.exe test/wrong_code/priv.key test/scripts/empty.sh | nc -w 1 127.0.0.1 56544 &
+sleep 2
 
 kill $pid &> /dev/null
 
