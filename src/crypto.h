@@ -63,8 +63,8 @@ typedef enum {
 // We assume that the signature algorithm used to sign the certificate is the same as the one which
 // will be used to sign bash scripts. The returned public key will only be able to verify signatures
 // of that type.
-ExtractCode extract_self_sign_for_code_sign(const byte *raw_cert, const x509Fields *fields, time_t now,
-                              PubKey *ret_pub_key);
+ExtractCode extract_self_sign_for_code_sign(const byte *raw_cert, const x509Fields *fields,
+                                            time_t now, PubKey *ret_pub_key);
 
 // pub_key must be a valid public key. This public key will be used to validate the signature
 // pointed to by sig and sig_size on the contents of data and data_size.

@@ -1,12 +1,11 @@
 #include "assert.h"
-
 #include "basic.h"
 #include "openssl/evp.h"
 #include "openssl/param_build.h"
 #include "string.h"
 
-#include "x509.h"
 #include "crypto.h"
+#include "x509.h"
 
 typedef struct {
   const byte *oid;
@@ -34,7 +33,7 @@ ExtractCode ed_extract(const byte *raw_cert, const x509Fields *fields, int key_t
 
   // The signature and public key ids must match with ed25519 and ed448.
   if (!certeq(raw_cert, fields->sig_id_start, fields->sig_id_end, fields->pub_key_id_start,
-               fields->pub_key_id_end)) {
+              fields->pub_key_id_end)) {
     return INVALID_SIG;
   }
 
@@ -207,14 +206,14 @@ out:
     OSSL_PARAM_BLD_free(rsa_build);
   if (exp != NULL)
     BN_free(exp);
-  if(modulus != NULL)
+  if (modulus != NULL)
     BN_free(modulus);
   return ret;
 }
 
 // Uses OpenSSL's EVP_Digest library to verify a public key signature.
-bool openssl_verify(PubKey *pub_key, const byte *data, uinta data_size,
-               const byte *sig, uinta sig_size) {
+bool openssl_verify(PubKey *pub_key, const byte *data, uinta data_size, const byte *sig,
+                    uinta sig_size) {
   if (sig_size != pub_key->exp_sig_size) {
     return false;
   }
@@ -269,8 +268,8 @@ ExtractCode pub_key_extract(const byte *raw_cert, const x509Fields *fields, PubK
   return UNSUPPORTED_ALG;
 }
 
-ExtractCode extract_self_sign_for_code_sign(const byte *raw_cert, const x509Fields *fields, time_t now,
-                              PubKey *ret_pub_key) {
+ExtractCode extract_self_sign_for_code_sign(const byte *raw_cert, const x509Fields *fields,
+                                            time_t now, PubKey *ret_pub_key) {
   if (fields->not_after < now) {
     return EXPIRED;
   }
@@ -297,7 +296,8 @@ ExtractCode extract_self_sign_for_code_sign(const byte *raw_cert, const x509Fiel
 
   // We require both key usage and extended key usage extensions on this certificate.
   uint32 mask = KEY_USAGE_FLAG_SIGN | KEY_USAGE_FLAG_KEY_CERT_SIGN | KEY_USAGE_FLAG_CODE_SIGNING;
-  if (!fields->has_key_usage || !fields->has_ext_key_usage || (fields->key_usage_flags & mask) != mask) {
+  if (!fields->has_key_usage || !fields->has_ext_key_usage ||
+      (fields->key_usage_flags & mask) != mask) {
     return INVALID_USAGE;
   }
 
@@ -307,8 +307,8 @@ ExtractCode extract_self_sign_for_code_sign(const byte *raw_cert, const x509Fiel
   }
 
   if (pub_key_verify(ret_pub_key, &raw_cert[fields->signed_data_start],
-                        fields->signed_data_end - fields->signed_data_start,
-                        &raw_cert[fields->sig_start], fields->sig_end - fields->sig_start)) {
+                     fields->signed_data_end - fields->signed_data_start,
+                     &raw_cert[fields->sig_start], fields->sig_end - fields->sig_start)) {
     ret_pub_key->expiry = fields->not_after;
     return CERT_OK;
   } else {

@@ -1,7 +1,7 @@
 #include "assert.h"
 #include "basic.h"
-#include "time.h"
 #include "string.h"
+#include "time.h"
 
 #include "x509.h"
 
@@ -83,8 +83,8 @@ ParseCode parse_any(const byte *raw_cert, uinta *idx, uinta parent_end, uinta *r
   return PARSE_OK;
 }
 
-ParseCode parse_data_element(const byte *raw_cert, uint8 expected_identifier, uinta *idx, uinta parent_end,
-                       uinta *ret_content_end) {
+ParseCode parse_data_element(const byte *raw_cert, uint8 expected_identifier, uinta *idx,
+                             uinta parent_end, uinta *ret_content_end) {
   uint8 identifier = 0;
   ParseCode code = parse_any(raw_cert, idx, parent_end, ret_content_end, &identifier);
   if (code != PARSE_OK) {
@@ -97,7 +97,6 @@ ParseCode parse_data_element(const byte *raw_cert, uint8 expected_identifier, ui
 }
 
 ParseCode parse_null(const byte *raw_cert, uinta *idx, uinta parent_end) {
-  uint8 identifier = 0;
   if (*idx + 2 > parent_end) {
     return UNEXPECTED_END_OF_DATA;
   }
@@ -119,15 +118,16 @@ ParseCode parse_null(const byte *raw_cert, uinta *idx, uinta parent_end) {
 // other return value.
 //
 // Ensures that *idx <= *ret_content_end <= parent_end after returning PARSE_OK.
-ParseCode parse_optional_data(const byte *raw_cert, uint8 expected_identifier, uinta *idx, uinta parent_end,
-                         uinta *ret_content_end) {
+ParseCode parse_optional_data(const byte *raw_cert, uint8 expected_identifier, uinta *idx,
+                              uinta parent_end, uinta *ret_content_end) {
   uinta pre_idx = *idx;
   uinta pre_end = *ret_content_end;
-  ParseCode code = parse_data_element(raw_cert, expected_identifier, idx, parent_end, ret_content_end);
+  ParseCode code =
+      parse_data_element(raw_cert, expected_identifier, idx, parent_end, ret_content_end);
   switch (code) {
   case UNEXPECTED_END_OF_DATA:
   case UNEXPECTED_IDENTIFIER:
-    // Nondeterministic rollback.
+    // Nondeterministic state rollback.
     *idx = pre_idx;
     *ret_content_end = pre_end;
   case PARSE_OK:
@@ -173,7 +173,7 @@ ParseCode parse_default_bool(const byte *raw_cert, uinta *idx, uinta parent_end,
 // There is no modern public key algorithm that has a key or signature size that does not align with
 // 8 bits. So we can safely discard the certificate if we encounter a bitstring with unused bits.
 ParseCode parse_bitstring_no_unused(const byte *raw_cert, uinta *idx, uinta parent_end,
-                                     uinta *ret_content_end) {
+                                    uinta *ret_content_end) {
   /*subjectPublicKey     BIT STRING*/
   ParseCode code = parse_data_element(raw_cert, DER_BITSTRING, idx, parent_end, ret_content_end);
   if (code != PARSE_OK) {
@@ -195,7 +195,7 @@ ParseCode parse_bitstring_no_unused(const byte *raw_cert, uinta *idx, uinta pare
   pathLenContraint INTEGER DEFAULT INFINITY,
 }*/
 ParseCode parse_basic_constraint(const byte *raw_cert, uinta idx, uinta extn_end,
-                                  x509Fields *ret_fields) {
+                                 x509Fields *ret_fields) {
   uinta constraint_end = 0;
   ParseCode code = parse_data_element(raw_cert, DER_SEQUENCE, &idx, extn_end, &constraint_end);
   if (code != PARSE_OK) {
@@ -225,7 +225,8 @@ ParseCode parse_basic_constraint(const byte *raw_cert, uinta idx, uinta extn_end
         return INVALID_INTEGER;
       }
       while (idx < path_end) {
-        ret_fields->path_len_constraint = (ret_fields->path_len_constraint << 8) | cast(uint32, raw_cert[idx]);
+        ret_fields->path_len_constraint =
+            (ret_fields->path_len_constraint << 8) | cast(uint32, raw_cert[idx]);
         idx += 1;
       }
       idx = path_end;
@@ -269,7 +270,8 @@ ParseCode parse_akid(const byte *raw_cert, uinta idx, uinta extn_end, x509Fields
 
   /*authorityCertIssuer       [1] GeneralNames            OPTIONAL*/
   uinta aci_end = IDX_NONE;
-  code = parse_optional_data(raw_cert, DER_IMPLICIT_1 | DER_CONSTRUCTED, &idx, akid_seq_end, &aci_end);
+  code =
+      parse_optional_data(raw_cert, DER_IMPLICIT_1 | DER_CONSTRUCTED, &idx, akid_seq_end, &aci_end);
   if (code != PARSE_OK) {
     return code;
   }
@@ -303,7 +305,8 @@ ParseCode parse_akid(const byte *raw_cert, uinta idx, uinta extn_end, x509Fields
 
 /*SubjectKeyIdentifier ::= KeyIdentifier*/
 ParseCode parse_skid(const byte *raw_cert, uinta idx, uinta extn_end, x509Fields *ret_fields) {
-  ParseCode code = parse_data_element(raw_cert, DER_OCTET_STRING, &idx, extn_end, &ret_fields->skid_end);
+  ParseCode code =
+      parse_data_element(raw_cert, DER_OCTET_STRING, &idx, extn_end, &ret_fields->skid_end);
   if (code != PARSE_OK) {
     return code;
   }
@@ -368,7 +371,8 @@ ParseCode parse_key_usage(const byte *raw_cert, uinta idx, uinta extn_end, x509F
 /*ExtKeyUsageSyntax ::= SEQUENCE SIZE (1..MAX) OF KeyPurposeId*/
 // This function assumes that ret_fields->key_usage_flags is already initialized and will bitwise or
 // the new usages onto it.
-ParseCode parse_ext_key_usage(const byte *raw_cert, uinta idx, uinta extn_end, x509Fields *ret_fields) {
+ParseCode parse_ext_key_usage(const byte *raw_cert, uinta idx, uinta extn_end,
+                              x509Fields *ret_fields) {
   const byte KP_OID[] = {0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x00};
 
   uinta usage_end = 0;
@@ -448,7 +452,7 @@ const uinta supported_etxns_size = sizeof(supported_etxns) / sizeof(supported_et
 // Sets the default values of all extension associated fields in ret_fields.
 // This function must be updated with any newly support extension fields. Otherwise ret_fields
 // of the function parse_x509 may not be fully initialized even after returning PARSE_OK.
-void assign_default_extensions(x509Fields* ret_fields) {
+void assign_default_extensions(x509Fields *ret_fields) {
   ret_fields->skid_start = IDX_NONE;
   ret_fields->skid_end = IDX_NONE;
   ret_fields->akid_start = IDX_NONE;
@@ -615,7 +619,7 @@ ParseCode parse_name(const byte *raw_cert, uinta *idx, uinta parent_end) {
         return code;
       }
 
-      uinta attribute_type_start = *idx;
+      // uinta attribute_type_start = *idx;
       *idx = attribute_type_end;
 
       /*AttributeValue ::= ANY -- DEFINED BY AttributeType*/
@@ -629,7 +633,7 @@ ParseCode parse_name(const byte *raw_cert, uinta *idx, uinta parent_end) {
         return TRAILING_DATA;
       }
 
-      uinta attribute_value_start = *idx;
+      // uinta attribute_value_start = *idx;
       *idx = attribute_value_end;
 
       // This is where name attributes and values would be used and recorded if they were supported.
@@ -641,7 +645,7 @@ ParseCode parse_name(const byte *raw_cert, uinta *idx, uinta parent_end) {
   return PARSE_OK;
 }
 
-ParseCode parse_x509(const byte *raw_cert, uinta raw_cert_size, x509Fields* ret_fields) {
+ParseCode parse_x509(const byte *raw_cert, uinta raw_cert_size, x509Fields *ret_fields) {
   uinta idx_mem = 0;
   uinta *idx = &idx_mem;
 
@@ -651,7 +655,7 @@ ParseCode parse_x509(const byte *raw_cert, uinta raw_cert_size, x509Fields* ret_
         signatureValue       BIT STRING  }*/
   uinta cert_end = 0;
   ParseCode code = parse_data_element(raw_cert, DER_SEQUENCE, idx, raw_cert_size, &cert_end);
-  if(code != PARSE_OK) {
+  if (code != PARSE_OK) {
     return code;
   }
   if (raw_cert_size != cert_end) {
@@ -707,7 +711,6 @@ ParseCode parse_x509(const byte *raw_cert, uinta raw_cert_size, x509Fields* ret_
   *idx = version_end;
 
   /*serialNumber         CertificateSerialNumber*/
-  uinta serial_end = 0;
   code = parse_data_element(raw_cert, DER_INTEGER, idx, tbs_cert_end, &ret_fields->cert_serial_end);
   if (code != PARSE_OK) {
     return code;
@@ -717,8 +720,9 @@ ParseCode parse_x509(const byte *raw_cert, uinta raw_cert_size, x509Fields* ret_
   *idx = ret_fields->cert_serial_end;
 
   /*signature            AlgorithmIdentifier*/
-  code = parse_alg_id(raw_cert, idx, tbs_cert_end, &ret_fields->sig_id_start, &ret_fields->sig_id_end,
-                      &ret_fields->sig_oid_start, &ret_fields->sig_oid_end);
+  code =
+      parse_alg_id(raw_cert, idx, tbs_cert_end, &ret_fields->sig_id_start, &ret_fields->sig_id_end,
+                   &ret_fields->sig_oid_start, &ret_fields->sig_oid_end);
   if (code != PARSE_OK) {
     return code;
   }
@@ -772,14 +776,14 @@ ParseCode parse_x509(const byte *raw_cert, uinta raw_cert_size, x509Fields* ret_
 
   /*algorithm            AlgorithmIdentifier*/
   code = parse_alg_id(raw_cert, idx, public_key_info_end, &ret_fields->pub_key_id_start,
-                      &ret_fields->pub_key_id_end, &ret_fields->pub_key_oid_start, &ret_fields->pub_key_oid_end);
+                      &ret_fields->pub_key_id_end, &ret_fields->pub_key_oid_start,
+                      &ret_fields->pub_key_oid_end);
   if (code != PARSE_OK) {
     return code;
   }
 
   /*subjectPublicKey     BIT STRING*/
-  code = parse_bitstring_no_unused(raw_cert, idx, public_key_info_end,
-                                   &ret_fields->pub_key_end);
+  code = parse_bitstring_no_unused(raw_cert, idx, public_key_info_end, &ret_fields->pub_key_end);
   if (code != PARSE_OK) {
     return code;
   }
@@ -902,7 +906,9 @@ ParseCode parse_x509(const byte *raw_cert, uinta raw_cert_size, x509Fields* ret_
       bool critical_fail = critical;
       for_each_in(const SupportedExtn, s_extn, supported_etxns, supported_etxns_size) {
         if (memeq(s_extn->oid, s_extn->oid_size, extn_oid, extn_oid_size)) {
-          if ((s_extn->criticality & 0b10) > 0 && (s_extn->criticality & 0b01) != cast(int, critical)) {
+          // Check if this extension mandates a specific criticality.
+          if ((s_extn->criticality & 0b10) > 0 &&
+              (s_extn->criticality & 0b01) != cast(int, critical)) {
             return INVALID_CRITICALITY;
           }
 

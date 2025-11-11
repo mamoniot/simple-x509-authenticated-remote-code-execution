@@ -8,6 +8,8 @@
 
 #include "stdbool.h"
 
+// This code was written rather quickly and lazily. It is not particularly robust, but I am not
+// concerned about this since it is only meant to be used for testing.
 int main(int argc, char *argv[]) {
   if (argc < 3) {
     perror("Not enough arguments");
@@ -54,8 +56,8 @@ int main(int argc, char *argv[]) {
     return -1;
   }
 
-  void *data = malloc(1<<18);
-  size_t data_cap = 1<<18;
+  void *data = malloc(1 << 18);
+  size_t data_cap = 1 << 18;
   size_t data_size = 0;
 
   while (true) {
@@ -74,8 +76,8 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  unsigned char sig[1<<18];
-  size_t sig_size = 1<<18;
+  unsigned char sig[1 << 18];
+  size_t sig_size = 1 << 18;
 
   if (EVP_DigestSign(mdctx, sig, &sig_size, data, data_size) != 1) {
     ERR_print_errors_fp(stderr);

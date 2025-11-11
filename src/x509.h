@@ -209,11 +209,12 @@ typedef struct {
   uinta akid_start;
   uinta akid_end;
 
-  // Must be present. Contains the not_before field of the certificate, converted to a unix timestamp.
+  // Must be present. Contains the not_before field of the certificate, converted to a unix
+  // timestamp.
   time_t not_before;
   // Must be present. Contains the not_before field of the certificate, converted to a unix
-  // timestamp. This will be a very large timestamp (usually 99991231235959Z) if this certificate has
-  // no definite expiration.
+  // timestamp. This will be a very large timestamp (usually 99991231235959Z) if this certificate
+  // has no definite expiration.
   time_t not_after;
 
   // Will be true if and only if the certificate had the basic constraint extension and that

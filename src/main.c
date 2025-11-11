@@ -17,10 +17,16 @@
 #include "crypto.h"
 #include "x509.h"
 
+// Internal TCP socket session backlog.
 const int TCP_BACKLOG = 16;
+// Port number to bind to. If I continued development I would add a -p argument so this can be
+// configured at runtime.
 const uint16 DEFAULT_PORT = 56544;
+// Maximum size any script can be before it is rejected.
 const uinta MAX_SCRIPT_SIZE = 2 * GIGABYTE;
+// Amount of epoll event batching to allow.
 #define MAX_EPOLL_EVENTS 8
+// The maximum number of concurrent connections this server allows.
 #define MAX_CONCURRENCY 128
 
 // Structure that contains a connection file descriptor and a buffer to receive TCP data in.
@@ -206,9 +212,10 @@ bool read_cert(const char *path, PubKey *ret_pub_key) {
       fprintf(stderr, "Cerficate is not self-signed (%s)\n", path);
       break;
     case INVALID_USAGE:
-      fprintf(stderr, "Cerficate has restricted usage, it must explicitly allow code signing and "
-             "certificate signing (%s)\n",
-             path);
+      fprintf(stderr,
+              "Cerficate has restricted usage, it must explicitly allow code signing and "
+              "certificate signing (%s)\n",
+              path);
       break;
     case INVALID_PUB_KEY_PARAMS:
       fprintf(stderr, "Cerficate has invalid public key parameters (%s)\n", path);
@@ -292,11 +299,12 @@ int main_protected(Resources *resources, int argc, char *argv[]) {
   uinta attempts_total = 0;
 
   if (S_ISDIR(path_stat.st_mode)) {
-    // The given path is a directory, we will attempt to trust every valid certificate found within it.
+    // The given path is a directory, we will attempt to trust every valid certificate found within
+    // it.
     DIR *dir = opendir(path);
     if (dir == NULL) {
       fprintf(stderr, "Could not open certificate directory '%s'\n", path);
-      return - 1;
+      return -1;
     }
 
     uinta full_file_path_cap = KILOBYTE;
@@ -389,10 +397,10 @@ int main_protected(Resources *resources, int argc, char *argv[]) {
   assert(MAX_CONCURRENCY > 0 && MAX_EPOLL_EVENTS > 2);
   struct epoll_event events[MAX_EPOLL_EVENTS] = {0};
 
-    // MAX_INT32 is a sentinel value that implies a connection is available on sock_fd.
+  // MAX_INT32 is a sentinel value that implies a connection is available on sock_fd.
   struct epoll_event add_sock = {
-    .events = EPOLLIN,
-    .data.fd = MAX_INT32,
+      .events = EPOLLIN,
+      .data.fd = MAX_INT32,
   };
   if (epoll_ctl(resources->epoll_fd, EPOLL_CTL_ADD, resources->sock_fd, &add_sock) < 0) {
     perror("Call to epoll_ctl failed");
@@ -516,8 +524,8 @@ int main_protected(Resources *resources, int argc, char *argv[]) {
           // are fixed-size, we can interpret every input byte less than the signature size as
           // unambiguously part of the signature. Furthermore, if the first line is just a
           // signature, we cannot easily include a key identifier with the script. So we have to try
-          // to authenticate with each public key until we find a match. This is safe to do, just not
-          // very efficient.
+          // to authenticate with each public key until we find a match. This is safe to do, just
+          // not very efficient.
           for_each_lt(i, resources->keys_size) {
             PubKey *pub_key = &resources->keys[i];
             if (now > pub_key->expiry) {
