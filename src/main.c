@@ -111,14 +111,18 @@ void exec_script(byte *script, uinta script_size, uint32 script_n) {
   if (pid == 0) {
     // This is the child process.
     // Redirect stdin.
-    dup2(in_pipe[0], STDIN_FILENO);
+    int ret = dup2(in_pipe[0], STDIN_FILENO);
     close(in_pipe[0]);
     close(in_pipe[1]);
-
-    const char* BASH = "bash";
-    execlp(BASH, BASH, NULL);
-    // execlp only returns on error.
-    perror("execlp");
+    if (ret < 0) {
+      perror("dup2 pipe to stdin failed");
+    } else {
+      // Execute bash such that it runs whatever the parent process feeds it from in_pipe.
+      const char *BASH = "bash";
+      execlp(BASH, BASH, NULL);
+      // execlp only returns on error.
+      perror("execlp");
+    }
     exit(-1);
   }
 
@@ -127,7 +131,15 @@ void exec_script(byte *script, uinta script_size, uint32 script_n) {
   fflush(stdout);
 
   // This write could deadlock if we ran a command other than bash.
-  write(in_pipe[1], script, script_size);
+  uinta i = 0;
+  while (i < script_size) {
+    int ret = write(in_pipe[1], &script[i], script_size - i);
+    if (ret < 0) {
+      perror("write to command pipe failed");
+      break;
+    }
+    i += ret;
+  }
 
   close(in_pipe[0]);
   // Closing the pipe should flush it according to man.
