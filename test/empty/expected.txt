@@ -1,0 +1,1 @@
+'test/empty/cert.der' does not contain data

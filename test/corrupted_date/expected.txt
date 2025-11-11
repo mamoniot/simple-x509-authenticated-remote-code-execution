@@ -1,0 +1,1 @@
+Encountered invalid certificate validity timestamp (test/corrupted_date/cert.der)

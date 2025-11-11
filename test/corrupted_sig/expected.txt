@@ -1,0 +1,1 @@
+Cerficate's signature could not be authenticated (test/corrupted_sig/cert.der)

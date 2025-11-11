@@ -1,0 +1,1 @@
+Certificate sequence encoding ended unexpectedly (test/trailing_key/cert.der)

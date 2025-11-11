@@ -1,0 +1,1 @@
+Encountered unexpected identifier in certificate (test/large/cert.der)
