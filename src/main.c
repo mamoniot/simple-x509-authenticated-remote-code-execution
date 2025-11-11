@@ -325,8 +325,8 @@ int main_protected(Resources *resources, int argc, char *argv[]) {
         resources->keys_size += 1;
       }
     }
-    free(full_file_path);
 
+    free(full_file_path);
     closedir(dir);
 
     if (resources->keys_size == 0) {
@@ -465,15 +465,18 @@ int main_protected(Resources *resources, int argc, char *argv[]) {
             // Read all of the data before returning to epoll_wait.
             inta ret = recv(conn->fd, &conn->buf[conn->buf_size], conn->buf_cap - conn->buf_size,
                             MSG_DONTWAIT);
-            conn->buf_size += ret;
-
             if (ret < 0) {
               if (errno != EAGAIN || errno != EWOULDBLOCK) {
                 perror("Failed to receive data from a TCP connection");
                 free_conn(resources, conn);
               }
               break;
-            } else if (conn->buf_size >= MAX_SCRIPT_SIZE) {
+            } else if (ret == 0) {
+              break;
+            }
+
+            conn->buf_size += ret;
+            if (conn->buf_size >= MAX_SCRIPT_SIZE) {
               fprintf(stderr,
                       "TCP connection exceeded maximum allowed script size of %" PRIu64 "\n",
                       MAX_SCRIPT_SIZE);
@@ -482,8 +485,6 @@ int main_protected(Resources *resources, int argc, char *argv[]) {
             } else if (conn->buf_size >= conn->buf_cap) {
               conn->buf_cap *= 2;
               conn->buf = realloc(conn->buf, conn->buf_cap);
-            } else {
-              break;
             }
           }
         }
