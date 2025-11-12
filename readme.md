@@ -37,7 +37,7 @@ The server executable expects a single argument. This argument specifies the pat
 
 Each certificate will be parsed and verified, and only valid ceriticates will be used for signature verification. Only self-signed certificates are accepted.
 
-```./server.exe FILE```
+```./server.exe FILE/DIR```
 
 ## How to Use
 
@@ -95,11 +95,11 @@ If I were to continue development I would implement a networking layer within th
 
 ### Command
 
-Bash script `test_all.sh` will run all end to end test cases sequentially on a release build of the server. It will run the server repeatedly and compare its output with an `expected.txt` file that contains the correct output. "Test passed" or "Test failed" will be output for each of the test cases.
+Bash script `test_all.sh` will run all end to end test cases sequentially on a debug build of the server. It will run the server repeatedly and compare its output with an `expected.txt` file that contains the correct output. "Test passed" or "Test failed" will be output for each of the test cases.
 
 ```./test_all.sh```
 
-If the test is stopped before completion there will likely be an orphaned `server.exe` process that is still bound to port 56544. Command `kill "$(pgrep server.exe)"` can be used to kill this process and unbind port 56544.
+If the test is stopped before completion there will likely be an orphaned `server.out` process that is still bound to port 56544. Command `kill "$(pgrep server.out)"` can be used to kill this process and unbind port 56544.
 
 ### Networking Nondeterminism
 

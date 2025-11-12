@@ -1,6 +1,8 @@
 #!/bin/bash
+set -e
+
 echo "Compiling server"
-./release.sh
+./debug.sh
 ./gen_sig.sh
 
 echo "Testing ed25519"

@@ -17,12 +17,12 @@ else
     echo "Expected program output not generated, generating now..."
 fi
 
-./server.exe $1/cert.der &> "$OUT" &
+./server.out $1/cert.der &> "$OUT" &
 pid=$!
 # Timeout to allow the server to finish opening a socket before sending data.
 sleep 0.5
 
-if pgrep server.exe &> /dev/null; then
+if pgrep server.out &> /dev/null; then
     # Requests are sent concurrently but they complete in a definite order.
     # This is technically a race condition if sending takes longer than 1 second to complete.
     # When sending over localhost this should never happen.
@@ -54,6 +54,7 @@ if [[ $TEST -eq 1 ]]; then
         echo "Test passed"
     else
         echo "Test failed! Incorrect output written to '$TEMP'"
+        exit -1
     fi
 else
     echo "Please verify the expected output is correct before testing again"
