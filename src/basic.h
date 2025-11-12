@@ -1,4 +1,4 @@
-// By Monica Moniot
+// By ****** ******
 // This header contains a large set macros I find essential for
 // programming in C. Just #include this header file to use it.
 
@@ -107,7 +107,7 @@ typedef int32  inta;
     This software is available under 2 licenses -- choose whichever you prefer.
     ------------------------------------------------------------------------------
     ALTERNATIVE A - MIT License
-    Copyright (c) 2020 Monica Moniot
+    Copyright (c) 2020 ****** ******
     Permission is hereby granted, free of charge, to any person obtaining a copy of
     this software and associated documentation files (the "Software"), to deal in
     the Software without restriction, including without limitation the rights to
