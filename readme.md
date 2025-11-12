@@ -1,6 +1,6 @@
 # Simple x509 Authenticated Remote Code Execution
 
-This repository contains the source code for a server that takes as input a set of x509 certificates, and will listen over TCP for signed bash scripts. If the signature is considered valid under one of the x509 certificates, the entire script will be run and the output of the script will be written to stdout.
+This repository contains the source code for a linux server that takes as input a set of x509 certificates, and will listen over TCP for signed bash scripts. If the signature is considered valid under one of the x509 certificates, the entire script will be run and the output of the script will be written to stdout.
 
 ## How to compile
 ### Prerequisites
