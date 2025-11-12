@@ -56,7 +56,7 @@ This is a list of all of the public key algorithms currently supported by this s
 
 Any other will be rejected by the server upon parsing its x509 certificate.
 
-This server deliberately does not support any version of RSA-2048, as RSA-2048 is no longer considered forward-secure and has been deprecated by NIST. It is straigthforward to support more public key algorithms by adding to source code file `src/crypto.c`.
+This server deliberately does not support any version of RSA-2048, as RSA-2048 is no longer considered forward-secure and has been deprecated by NIST. It is straigthforward to support more public key algorithms by adding to source code file `src/crypto.c`. It is also straightforward to replace the implementation of any individual public key and digest algorithm.
 
 ### TCP Protocol
 
@@ -89,15 +89,21 @@ The output of `gen_sig` can then be sent to the server through TCP. This can be 
 
 TCP port 56544 must be available for binding prior to running the test script. The contents of `test/` must be unmodified. It is highly recommended to make sure that TCP port 56544 is blocked externally by a firewall. Otherwise anyone who has access to the testing keys could remotely execute code during the duration of the test. It is also recommended to run these tests from a non-admin user account.
 
-If I were to continue development I would implement a networking layer within the server. This would then be used to test the server without allowing it to bind to a TCP port.
+If I were to continue development I would implement a networking layer within the server, so that the server can be configured to use domain sockets or an in-process communication protocol instead of TCP. That way end to end tests can be run without openning external ports.
 
 ### Command
 
-Bash script `test_all.sh` will run all test cases sequentially on a release build of the server. It will run the server repeatedly and compare its output with an `expected.txt` file that contains the correct output. "Test passed" or "Test failed" will be output for each of the test cases.
+Bash script `test_all.sh` will run all end to end test cases sequentially on a release build of the server. It will run the server repeatedly and compare its output with an `expected.txt` file that contains the correct output. "Test passed" or "Test failed" will be output for each of the test cases.
 
 ```./test_all.sh```
 
 If the test is stopped before completion there will likely be an orphaned `server.exe` process that is still bound to port 56544. Command `kill "$(pgrep server.exe)"` can be used to kill this process and unbind port 56544.
+
+### Networking Nondeterminism
+
+To overcome the nondeterminism inherent to both networking and process scheduling, the test scripts rely heavily on timeouts. This allows the tests to have fully deterministic outcomes, so long as no individual test case takes longer than its timeout to process. However this does mean that testing takes unnecessarily long to complete, since nearly all testing time is spent waiting on timeouts.
+
+If I were to continue development I would heavily consider building an instrumentation framework for this server, such that the testing script is able to block on status changes of individual requests. This would remove the need for timeouts, thus allowing the full testing suite to complete in just a  second or two. It would also remove the risk of tests failing on very low-end machines due to nothing more than too short of timeouts. This is a lot of work though and I consider the tests fast enough for software this simple.
 
 ## Security Disclaimers
 
