@@ -8,11 +8,11 @@
 
 #include "stdbool.h"
 
-// This code was written rather quickly and lazily. It is not particularly robust, but I am not
-// concerned about this since it is only meant to be used for testing.
+// This code was written to be very simple in the interest of saving time. It is not particularly
+// robust, but I am not concerned about this since it is only meant to be used for testing.
 int main(int argc, char *argv[]) {
   if (argc < 3) {
-    perror("Not enough arguments");
+    fprintf(stderr, "Not enough arguments, usage:\n%s KEY SCRIPT [sha256/sha384/sha512]\n", argv[0]);
     return -1;
   }
 

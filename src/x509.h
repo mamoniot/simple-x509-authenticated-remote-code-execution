@@ -152,7 +152,10 @@
 
 // Struct that contains indices to individual fields of an x509 certificate.
 // The function parse_x509 will fill out this structure based on the x509 certificate it was passed.
-// When using this struct, some familiarity with rfc5280 is expected.
+// When using this struct, some familiarity with rfc5280 is expected. We parse more fields than are
+// actually currently used for the sake of making this software more extensible if developement were
+// to continue. From this point it would not be very hard to add logic for validating certificate
+// chains.
 //
 // Members with the suffix _start indicate that they are the index of the first byte of their field.
 // Members with the suffix _end indicate that they are the index of the byte after the last byte of
@@ -161,13 +164,13 @@
 //
 // Some members are marked as optional. Only in those cases they may have a value of IDX_NONE, which
 // indicates that the original certificate did not contain the field associated with this member.
-// All indices not equal to IDX_NONE are guaranteed to be within the bounds of the certificate
+// All indices not equal to IDX_NONE are guaranteed to be within the bounds of the raw_cert
 // passed to parse_x509.
 //
 // start-end index semantics were used because they massively simplify parsing and they avoid the
 // ambiguity and risk that raw pointer members would pose if they were written to a return structure
-// like this. It is very clear that this structure contains only numbers, and as such has no
-// lifetime requirements nor handling rules associated with the memory of the original ceriticate.
+// like this. It is very clear that this structure contains only numbers and as such this has no
+// memory handling rules associated with the memory of the original ceriticate.
 typedef struct {
   // Must be present.
   uinta sig_id_start;
