@@ -66,6 +66,8 @@ The server will only attempt to verify and run the bash script after the TCP con
 
 ### Status of Execution
 
+When the server fails to validate the input x509 certificates, or is unable to acquire necessary system resources, a plaintext error message will be output and execution will terminate. If a directory of many certificates was passed to the server, a non-fatal error message may be output. Execution may continue so long as a single x509 certificate is valid.
+
 When the server successfully receives and authenticates a bash script, it will print the line "Remote bash script #%d received and authenticated, executing now...", where "%d" is replaced with the script number. What will then follow on the next line is the output of the received bash script. If an error occurred or the script could not be authenticated, it will print a plaintext error message to stderr. Inauthentic scripts will not be assigned a script number. The error message "Remote bash script could not be authenticated, aborting execution" will be written when the script is inauthentic.
 
 ### Command
